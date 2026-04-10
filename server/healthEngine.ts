@@ -25,16 +25,7 @@ const SOURCE_BLUEPRINTS = [
     implementationStage: "direct_oauth",
     authType: "oauth2",
     displayName: "Dexcom CGM",
-    description: "Continuous glucose monitoring connector with OAuth-based ingestion scaffolding.",
-  },
-  {
-    provider: "glooko",
-    category: "glucose",
-    status: "attention",
-    implementationStage: "partner_required",
-    authType: "partner",
-    displayName: "Glooko",
-    description: "Partner-oriented diabetes data connector for device, glucose log, and therapy imports.",
+    description: "Continuous glucose monitoring connector with OAuth-based ingestion.",
   },
   {
     provider: "fitbit",
@@ -46,13 +37,13 @@ const SOURCE_BLUEPRINTS = [
     description: "Activity and sleep connector for steps, workouts, readiness, and sleep metrics.",
   },
   {
-    provider: "google_fit",
-    category: "activity",
-    status: "planned",
-    implementationStage: "legacy",
-    authType: "legacy",
-    displayName: "Google Fit",
-    description: "Legacy activity connector placeholder reflecting current platform deprecation concerns.",
+    provider: "oura",
+    category: "sleep",
+    status: "ready",
+    implementationStage: "direct_oauth",
+    authType: "oauth2",
+    displayName: "Oura",
+    description: "Sleep and recovery connector for nightly sessions, readiness, and resting trends.",
   },
   {
     provider: "apple_health",
@@ -61,34 +52,16 @@ const SOURCE_BLUEPRINTS = [
     implementationStage: "native_bridge",
     authType: "native_bridge",
     displayName: "Apple Health",
-    description: "Native bridge placeholder for HealthKit-derived activity, sleep, and nutrition signals.",
+    description: "Native bridge for HealthKit-derived activity, sleep, and nutrition signals.",
   },
   {
-    provider: "myfitnesspal",
-    category: "nutrition",
-    status: "attention",
-    implementationStage: "partner_required",
-    authType: "partner",
-    displayName: "MyFitnessPal",
-    description: "Nutrition logging connector placeholder pending partner access for meal and macro import.",
-  },
-  {
-    provider: "cronometer",
-    category: "nutrition",
-    status: "ready",
-    implementationStage: "planned",
-    authType: "manual",
-    displayName: "Cronometer",
-    description: "Nutrition connector placeholder with normalization support and readiness tracking.",
-  },
-  {
-    provider: "oura",
-    category: "sleep",
-    status: "ready",
-    implementationStage: "direct_oauth",
-    authType: "oauth2",
-    displayName: "Oura",
-    description: "Sleep and recovery connector for nightly sessions, readiness, and resting trends.",
+    provider: "google_fit",
+    category: "activity",
+    status: "planned",
+    implementationStage: "legacy",
+    authType: "legacy",
+    displayName: "Google Fit",
+    description: "Activity connector (note: Google Fit API is deprecated for new apps).",
   },
 ] as const;
 
@@ -144,9 +117,7 @@ export async function ensureSeedDataForUser(userId: number) {
                 ? ["steps", "workouts", "sleep"]
                 : source.provider === "oura"
                   ? ["sleep", "recovery"]
-                  : source.provider === "myfitnesspal" || source.provider === "cronometer"
-                    ? ["nutrition", "macros"]
-                    : ["status"],
+                  : ["status"],
         },
       }))
     );

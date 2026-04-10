@@ -100,35 +100,7 @@ const credentialConfigs: Record<string, { fields: Array<{ key: string; label: st
       },
     ],
   },
-  myfitnesspal: {
-    fields: [
-      {
-        key: "apiKey",
-        label: "API Key",
-        type: "password",
-        placeholder: "Paste your MyFitnessPal API key",
-        required: true,
-      },
-      {
-        key: "userId",
-        label: "User ID",
-        type: "text",
-        placeholder: "Your MyFitnessPal user ID",
-        required: true,
-      },
-    ],
-  },
-  cronometer: {
-    fields: [
-      {
-        key: "apiKey",
-        label: "API Key",
-        type: "password",
-        placeholder: "Paste your Cronometer API key",
-        required: true,
-      },
-    ],
-  },
+
   "apple-health": {
     fields: [
       {

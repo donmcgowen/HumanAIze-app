@@ -130,20 +130,7 @@ function validateCredentials(sourceName: string, credentials: Record<string, str
       }
       break;
 
-    case "myfitnesspal":
-      if (!credentials.apiKey || credentials.apiKey.trim().length === 0) {
-        throw new Error("MyFitnessPal API key is required");
-      }
-      if (!credentials.userId || credentials.userId.trim().length === 0) {
-        throw new Error("MyFitnessPal user ID is required");
-      }
-      break;
 
-    case "cronometer":
-      if (!credentials.apiKey || credentials.apiKey.trim().length === 0) {
-        throw new Error("Cronometer API key is required");
-      }
-      break;
 
     case "google-fit":
       if (!credentials.accessToken || credentials.accessToken.trim().length === 0) {
@@ -163,7 +150,7 @@ function getCredentialType(sourceName: string): string {
   const sourceKey = (sourceName || "").toLowerCase().replace(/\s+/g, "-");
 
   const oauthSources = ["dexcom", "fitbit", "oura", "google-fit"];
-  const apiKeySources = ["glooko", "myfitnesspal", "cronometer"];
+  const apiKeySources: string[] = [];
 
   if (oauthSources.includes(sourceKey)) {
     return "oauth";
@@ -188,8 +175,7 @@ export async function testSourceCredentials(
     switch (sourceKey) {
       case "dexcom":
         return await testDexcomCredentials(credentials);
-      case "glooko":
-        return await testGlookoCredentials(credentials);
+
       case "fitbit":
         return await testFitbitCredentials(credentials);
       case "oura":
