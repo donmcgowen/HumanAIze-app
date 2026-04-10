@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { healthSources } from "../drizzle/schema";
 import { getDb } from "./db";
+import { authenticateDexcom, verifyDexcomToken } from "./dexcomAuth";
 
 /**
  * Store user-provided credentials for a health source.
@@ -45,9 +46,22 @@ export async function storeSourceCredentials(
   const existingMetadata = (sourceRecord.metadata as Record<string, any>) || {};
   const sourceKey = (sourceRecord.displayName || "").toLowerCase().replace(/\s+/g, "-");
   
-  // For custom-app, only store non-sensitive metadata
+  // For Dexcom, exchange username/password for access token
   let credentialsToStore: Record<string, any> = credentials;
-  if (sourceKey === "custom-app") {
+  if (sourceKey === "dexcom") {
+    try {
+      const tokenData = await authenticateDexcom(credentials.username, credentials.password);
+      // Store tokens, not username/password
+      credentialsToStore = {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token || null,
+        expiresIn: tokenData.expires_in || 3600,
+        authType: "oauth_password_grant",
+      };
+    } catch (error) {
+      throw new Error(`Failed to authenticate with Dexcom: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else if (sourceKey === "custom-app") {
     // Only store app name and category, not username/password
     credentialsToStore = {
       appName: credentials.appName,
@@ -119,8 +133,11 @@ function validateCredentials(sourceName: string, credentials: Record<string, str
 
   switch (sourceKey) {
     case "dexcom":
-      if (!credentials.accessToken || credentials.accessToken.trim().length === 0) {
-        throw new Error("Dexcom access token is required");
+      if (!credentials.username || credentials.username.trim().length === 0) {
+        throw new Error("Dexcom username is required");
+      }
+      if (!credentials.password || credentials.password.trim().length === 0) {
+        throw new Error("Dexcom password is required");
       }
       break;
 
@@ -176,11 +193,14 @@ function validateCredentials(sourceName: string, credentials: Record<string, str
 function getCredentialType(sourceName: string): string {
   const sourceKey = (sourceName || "").toLowerCase().replace(/\s+/g, "-");
 
-  const oauthSources = ["dexcom", "fitbit", "oura", "google-fit"];
+  const oauthSources = ["fitbit", "oura", "google-fit"];
+  const usernamePasswordSources = ["dexcom"];
   const apiKeySources: string[] = [];
 
   if (oauthSources.includes(sourceKey)) {
     return "oauth";
+  } else if (usernamePasswordSources.includes(sourceKey)) {
+    return "username_password";
   } else if (apiKeySources.includes(sourceKey)) {
     return "api_key";
   } else if (sourceKey === "custom-app") {
@@ -238,19 +258,22 @@ export async function testSourceCredentials(
 async function testDexcomCredentials(credentials: Record<string, string>): Promise<boolean> {
   try {
     console.log("Testing Dexcom credentials...");
-    const response = await fetch("https://api.dexcom.com/v2/users/self", {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${credentials.accessToken || ""}`,
-        "Content-Type": "application/json",
-      },
-    });
-    console.log(`Dexcom API response: ${response.status} ${response.statusText}`);
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Dexcom error: ${errorText}`);
+
+    if (!credentials.username || !credentials.password) {
+      console.error("Dexcom username and password are required");
       return false;
     }
+
+    // Authenticate with Dexcom Developer API
+    const tokenData = await authenticateDexcom(credentials.username, credentials.password);
+
+    // Verify token is valid
+    const isValid = await verifyDexcomToken(tokenData.access_token);
+    if (!isValid) {
+      console.error("Failed to verify Dexcom token");
+      return false;
+    }
+
     console.log("✓ Dexcom credentials are valid");
     return true;
   } catch (error) {

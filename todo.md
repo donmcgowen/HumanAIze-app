@@ -216,3 +216,14 @@
 - [x] Verify renamed sources display correctly in browser
 - [x] Added migrateCustomAppToConnectApp endpoint for existing data
 - [x] Ran migration: 282 rows updated from "Custom App" to "Connect App"
+
+
+## Bug Report - Dexcom Authentication (v1.21 - Complete)
+
+- [x] Update CredentialDialog to show username/password fields for Dexcom (instead of OAuth tokens)
+- [x] Update backend connectSource to validate Dexcom credentials via developer API
+- [x] Test Dexcom connection with username/password
+- [x] Verify data syncing works with new authentication method
+- [x] Updated credential validation to require username/password for Dexcom
+- [x] Updated getCredentialType to return "username_password" for Dexcom
+- [x] Updated testDexcomCredentials to accept username/password format

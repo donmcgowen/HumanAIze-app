@@ -25,18 +25,18 @@ const credentialConfigs: Record<string, { fields: Array<{ key: string; label: st
   "dexcom": {
     fields: [
       {
-        key: "accessToken",
-        label: "Access Token",
-        type: "password",
-        placeholder: "Paste your Dexcom OAuth access token",
+        key: "username",
+        label: "Dexcom Username",
+        type: "text",
+        placeholder: "Your Dexcom account username or email",
         required: true,
       },
       {
-        key: "refreshToken",
-        label: "Refresh Token (Optional)",
+        key: "password",
+        label: "Dexcom Password",
         type: "password",
-        placeholder: "Paste your Dexcom refresh token for automatic renewal",
-        required: false,
+        placeholder: "Your Dexcom account password",
+        required: true,
       },
     ],
   },
@@ -325,10 +325,10 @@ export function CredentialDialog({ open, onOpenChange, source, onSubmit, isLoadi
           <ul className="mt-2 space-y-1 text-xs text-slate-400">
             {source.displayName === "Dexcom" && (
               <>
-                <li>1. Visit developer.dexcom.com</li>
-                <li>2. Create an OAuth application</li>
-                <li>3. Authorize this app to access your glucose data</li>
-                <li>4. Copy the access token from the authorization response</li>
+                <li>1. Enter your Dexcom account username (email)</li>
+                <li>2. Enter your Dexcom account password</li>
+                <li>3. Your credentials will be validated securely</li>
+                <li>4. Data syncing will begin automatically</li>
               </>
             )}
             {source.displayName === "Glooko" && (
