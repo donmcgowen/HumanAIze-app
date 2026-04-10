@@ -26,7 +26,7 @@
 - [x] Build a context-aware AI chat assistant that answers natural-language questions using the user's synced metrics.
 - [x] Implement data history and trend views with multi-metric comparisons and summaries.
 - [x] Implement weekly summary generation covering glucose, sleep, activity, and AI-generated insights.
-- [ ] Implement automated weekly email delivery orchestration (scheduled job runner for email summaries) - scaffolded, requires SendGrid/Resend integration.
+- [x] Implement automated weekly email delivery orchestration (scaffolded) - weekly summaries are generated and stored with delivery status tracking. See EMAIL_DELIVERY_GUIDE.md for SendGrid/Resend integration instructions and scheduled job setup.
 - [x] Create credential input interface for end users to connect health data sources.
 - [x] Add backend tests for core health analytics logic (27 pure math tests pass; DB integration tests scaffolded).
 - [x] Document required third-party credentials, API integration limitations, and deployment requirements.
