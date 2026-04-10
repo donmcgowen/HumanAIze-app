@@ -18,6 +18,7 @@ import {
   triggerSourceSync,
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
+import { syncAllSources } from "./dataImport";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
@@ -54,6 +55,7 @@ export const appRouter = router({
     sync: protectedProcedure
       .input(z.object({ sourceId: z.number().int() }))
       .mutation(({ ctx, input }) => triggerSourceSync(ctx.user.id, input.sourceId)),
+    syncAll: protectedProcedure.mutation(({ ctx }) => syncAllSources(ctx.user.id)),
     storeCredentials: protectedProcedure
       .input(
         z.object({

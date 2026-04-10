@@ -10,8 +10,10 @@ export default function Sources() {
   const connectMutation = trpc.sources.connect.useMutation();
   const disconnectMutation = trpc.sources.disconnect.useMutation();
   const syncMutation = trpc.sources.sync.useMutation();
+  const syncAllMutation = trpc.sources.syncAll.useMutation();
   const storeCredentialsMutation = trpc.sources.storeCredentials.useMutation();
   const [syncing, setSyncing] = useState<Set<number>>(new Set());
+  const [syncingAll, setSyncingAll] = useState(false);
   const [selectedSource, setSelectedSource] = useState<any>(null);
   const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
 
@@ -64,6 +66,19 @@ export default function Sources() {
     }
   };
 
+  const handleSyncAll = async () => {
+    try {
+      setSyncingAll(true);
+      await syncAllMutation.mutateAsync();
+      await refetch();
+      toast.success("All sources synced successfully");
+    } catch (error) {
+      toast.error("Sync all failed");
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -85,11 +100,23 @@ export default function Sources() {
     <div className="space-y-8">
       {/* Header */}
       <div className="border-b border-white/10 pb-6">
-        <p className="tech-label">Data integration management</p>
-        <h1 className="tech-heading mt-2 text-3xl">Connected Sources</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-          Link, manage, and sync your health data sources. Each connection enables unified analytics across glucose, activity, nutrition, and sleep metrics.
-        </p>
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <p className="tech-label">Data integration management</p>
+            <h1 className="tech-heading mt-2 text-3xl">Connected Sources</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+              Link, manage, and sync your health data sources. Each connection enables unified analytics across glucose, activity, nutrition, and sleep metrics.
+            </p>
+          </div>
+          <Button
+            onClick={handleSyncAll}
+            disabled={syncingAll}
+            className="tech-button-primary flex items-center gap-2 whitespace-nowrap"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncingAll ? "animate-spin" : ""}`} />
+            {syncingAll ? "Syncing All..." : "Sync All"}
+          </Button>
+        </div>
       </div>
 
       {/* Glucose Sources */}
