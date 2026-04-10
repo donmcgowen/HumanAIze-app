@@ -276,3 +276,16 @@
 - [x] Added w-full overflow-x-auto to DashboardLayout main element
 - [x] Updated Dashboard grid to responsive: grid-cols-1 sm:grid-cols-2 lg:grid-cols-4
 - [x] All dashboard content now visible without horizontal scroll
+
+
+## Bug Report - Command Center Shows Placeholder Data (v1.26 - RESOLVED)
+
+- [x] Verify what data is actually in database for current user
+- [x] Identify why steps (8,220) and time in range (100%) are showing when no activity/sleep sources connected
+- [x] Fix dashboard to only show metrics from connected sources
+- [x] Steps Average now correctly shows 0 (no activity source)
+- [x] Time in Range now correctly shows 0% (no data)
+- [x] Removed demoMode: true marker from connectSource function
+- [x] Removed fake sync job records (recordCount: 21) from connectSource
+- [x] Deleted all demo data from database for user 1
+- [x] Dashboard now displays 0 values until real Dexcom data is synced

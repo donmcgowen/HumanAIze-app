@@ -132,20 +132,12 @@ export async function connectSource(userId: number, sourceId: number) {
       lastSyncStatus: "pending",
       lastError: null,
       lastSyncAt: Date.now(),
-      metadata: { connectedByUser: true, demoMode: true },
+      metadata: { connectedByUser: true },
     })
     .where(and(eq(healthSources.userId, userId), eq(healthSources.id, sourceId)));
 
-  await db.insert(syncJobs).values({
-    userId,
-    sourceId,
-    syncType: "manual",
-    status: "success",
-    startedAt: Date.now() - 5_000,
-    finishedAt: Date.now(),
-    recordCount: 21,
-  });
-
+  // Trigger background sync to fetch real data from the source
+  // Don't create fake sync records - let the background sync handle it
   return getSourcesForUser(userId);
 }
 
