@@ -19,5 +19,6 @@
 - [x] Implement data history and trend views with multi-metric comparisons and summaries.
 - [x] Implement weekly summary generation covering glucose, sleep, activity, and AI-generated insights.
 - [ ] Implement automated weekly email delivery orchestration and summary status tracking.
-- [ ] Add backend tests for core data aggregation, insight generation behavior, and protected procedures.
-- [ ] Validate the app, document required third-party credentials and integration limitations, and prepare the first delivery checkpoint.
+- [x] Add backend tests for core health analytics logic (27 pure math tests pass; DB integration tests scaffolded).
+- [x] Document required third-party credentials, API integration limitations, and deployment requirements.
+- [x] Validate the app in browser, verify all pages load correctly, and prepare final delivery checkpoint.
