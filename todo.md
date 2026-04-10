@@ -148,3 +148,18 @@
 - [ ] Add retry logic with exponential backoff for failed syncs
 - [ ] Add backend tests for background sync scheduler
 - [ ] Add UI indicator showing last sync time and status
+
+
+## Custom Source Management (v1.12 - Complete)
+
+- [x] Filter connected sources to show only active sources (remove fake/unused)
+- [x] Add backend endpoint to create custom sources (createCustomSource function)
+- [x] Fix Sources page custom source creation flow (Add Custom Source button wired)
+- [x] Test custom source creation with username/password
+
+## Profile Biometrics Unit Conversion (v1.13 - Complete)
+
+- [x] Add unit toggle to Profile page (lbs/kg for weight, inches/cm for height)
+- [x] Convert and display biometrics in selected units
+- [x] Show live conversion display next to input fields
+- [x] Test unit conversions

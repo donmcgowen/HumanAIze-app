@@ -21,7 +21,7 @@ const SOURCE_BLUEPRINTS = [
   {
     provider: "dexcom",
     category: "glucose",
-    status: "connected",
+    status: "ready",
     implementationStage: "direct_oauth",
     authType: "oauth2",
     displayName: "Dexcom CGM",
@@ -30,7 +30,7 @@ const SOURCE_BLUEPRINTS = [
   {
     provider: "fitbit",
     category: "multi",
-    status: "connected",
+    status: "ready",
     implementationStage: "direct_oauth",
     authType: "oauth2",
     displayName: "Fitbit",
@@ -116,8 +116,8 @@ export async function ensureSeedDataForUser(userId: number) {
         authType: source.authType,
         displayName: source.displayName,
         description: source.description,
-        lastSyncAt: source.status === "connected" ? now - index * 7_200_000 : null,
-        lastSyncStatus: source.status === "connected" ? ("success" as const) : ("idle" as const),
+        lastSyncAt: null,
+        lastSyncStatus: "idle" as const,
         metadata: {
           supportedMetrics:
             source.provider === "dexcom" || source.provider === "custom_app"
@@ -752,4 +752,36 @@ export async function getSummaries(userId: number) {
     summaries,
     preferences: preferences[0] ?? null,
   };
+}
+
+
+/**
+ * Create a new custom app source for a user.
+ * Custom sources allow users to connect any health data source with custom credentials.
+ */
+export async function createCustomSource(userId: number, appName: string, category: string) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available.");
+  }
+
+  // Create a new custom app source
+  const result = await db.insert(healthSources).values({
+    userId,
+    provider: "custom_app",
+    category: category as any,
+    status: "ready",
+    implementationStage: "custom",
+    authType: "custom",
+    displayName: appName,
+    description: `Custom app: ${appName}`,
+    metadata: {
+      isUserCreated: true,
+      createdAt: new Date().toISOString(),
+    },
+  });
+
+  // Return the created source
+  const sources = await db.select().from(healthSources).where(eq(healthSources.userId, userId)).orderBy(desc(healthSources.createdAt)).limit(1);
+  return sources[0] || null;
 }

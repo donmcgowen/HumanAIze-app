@@ -6,6 +6,7 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import {
   connectSource,
   createChatThread,
+  createCustomSource,
   disconnectSource,
   getDashboardBundle,
   getHistoryBundle,
@@ -71,6 +72,16 @@ export const appRouter = router({
           input.sourceId,
           input.credentials as Record<string, string>
         )
+      ),
+    createCustom: protectedProcedure
+      .input(
+        z.object({
+          appName: z.string().trim().min(1).max(120),
+          category: z.enum(["glucose", "activity", "nutrition", "sleep", "multi"]),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        createCustomSource(ctx.user.id, input.appName, input.category)
       ),
   }),
   assistant: router({

@@ -1,5 +1,5 @@
 import { trpc } from "@/lib/trpc";
-import { AlertCircle, CheckCircle2, Clock, Link2, Unlink2, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Link2, Unlink2, RefreshCw, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -12,16 +12,50 @@ export default function Sources() {
   const syncMutation = trpc.sources.sync.useMutation();
   const syncAllMutation = trpc.sources.syncAll.useMutation();
   const storeCredentialsMutation = trpc.sources.storeCredentials.useMutation();
+  const createCustomMutation = trpc.sources.createCustom.useMutation();
   const [syncing, setSyncing] = useState<Set<number>>(new Set());
   const [syncingAll, setSyncingAll] = useState(false);
   const [selectedSource, setSelectedSource] = useState<any>(null);
   const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
-
-  // Filter out partner-only sources (Glooko, MyFitnessPal, Cronometer) from the UI
+  const [creatingCustom, setCreatingCustom] = useState(false);
+  // Filter out partner-only sources and show only active (connected) sources
   const publicSources = allSources?.filter(
-    (s) => !["glooko", "myfitnesspal", "cronometer"].includes(s.provider)
+    (s) => ![
+"glooko", "myfitnesspal", "cronometer"].includes(s.provider)
   ) || [];
-  const sources = publicSources;
+  // Only show connected/active sources
+  const sources = publicSources.filter((s) => s.status === "connected");
+
+  const handleAddCustomSource = async () => {
+    const appName = prompt("Enter a name for your custom app (e.g., 'My Health API')");
+    if (!appName) return;
+
+    const categoryChoice = prompt("Select category:\n1. glucose\n2. activity\n3. nutrition\n4. sleep\n5. multi");
+    const categoryMap: Record<string, string> = {
+      "1": "glucose",
+      "2": "activity",
+      "3": "nutrition",
+      "4": "sleep",
+      "5": "multi",
+    };
+    const category = categoryMap[categoryChoice || ""] || "multi";
+
+    try {
+      setCreatingCustom(true);
+      const newSource = await createCustomMutation.mutateAsync({ appName, category: category as "glucose" | "activity" | "nutrition" | "sleep" | "multi" });
+      if (newSource) {
+        setSelectedSource(newSource);
+        setCredentialDialogOpen(true);
+        await refetch();
+        toast.success(`Custom source "${appName}" created`);
+      }
+    } catch (error) {
+      console.error("Failed to create custom source:", error);
+      toast.error("Failed to create custom source");
+    } finally {
+      setCreatingCustom(false);
+    }
+  };
 
   const handleConnect = async (source: any) => {
     // Open credential dialog for user input
@@ -95,21 +129,14 @@ export default function Sources() {
     );
   }
 
-  // Show message if no public sources are available
-  if (sources.length === 0) {
-    return (
-      <div className="space-y-4 text-center py-12">
-        <p className="text-slate-400">No public health sources available. Check back soon!</p>
-      </div>
-    );
-  }
-
   const groupedByCategory = {
     glucose: sources.filter((s) => s.category === "glucose" || s.category === "multi"),
     activity: sources.filter((s) => s.category === "activity" || s.category === "multi"),
     nutrition: sources.filter((s) => s.category === "nutrition" || s.category === "multi"),
     sleep: sources.filter((s) => s.category === "sleep" || s.category === "multi"),
   };
+
+  const hasConnectedSources = sources.length > 0;
 
   return (
     <div className="space-y-8">
@@ -123,16 +150,34 @@ export default function Sources() {
               Link, manage, and sync your health data sources. Each connection enables unified analytics across glucose, activity, nutrition, and sleep metrics.
             </p>
           </div>
-          <Button
-            onClick={handleSyncAll}
-            disabled={syncingAll}
-            className="tech-button-primary flex items-center gap-2 whitespace-nowrap"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncingAll ? "animate-spin" : ""}`} />
-            {syncingAll ? "Syncing All..." : "Sync All"}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleSyncAll}
+              disabled={syncingAll}
+              className="tech-button-primary flex items-center gap-2 whitespace-nowrap"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncingAll ? "animate-spin" : ""}`} />
+              {syncingAll ? "Syncing All..." : "Sync All"}
+            </Button>
+            <Button
+              onClick={handleAddCustomSource}
+              disabled={creatingCustom}
+              className="tech-button-secondary flex items-center gap-2 whitespace-nowrap"
+            >
+              <Plus className="h-4 w-4" />
+              {creatingCustom ? "Creating..." : "Add Custom Source"}
+            </Button>
+          </div>
         </div>
       </div>
+
+      {/* Empty State */}
+      {!hasConnectedSources && (
+        <div className="rounded-lg border border-white/10 bg-slate-900 p-8 text-center">
+          <p className="text-slate-400 mb-4">No connected health sources yet.</p>
+          <p className="text-slate-500 text-sm">Click "Add Custom Source" to connect your first health data source, or connect one of the available providers.</p>
+        </div>
+      )}
 
       {/* Glucose Sources */}
       <div>

@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InsightsPanel } from "@/components/InsightsPanel";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Settings } from "lucide-react";
 
 export function Profile() {
   const { data: profile, isLoading: isLoadingProfile, refetch } = trpc.profile.get.useQuery();
@@ -22,6 +22,29 @@ export function Profile() {
 
   const [bmi, setBmi] = useState<number | null>(null);
   const [bmiCategory, setBmiCategory] = useState<string>("");
+  const [weightUnit, setWeightUnit] = useState<"kg" | "lbs">("kg");
+  const [heightUnit, setHeightUnit] = useState<"cm" | "in">("cm");
+
+  // Unit conversion helpers
+  const convertWeight = (kg: number, toUnit: "kg" | "lbs") => {
+    return toUnit === "lbs" ? Math.round(kg * 2.20462 * 10) / 10 : kg;
+  };
+
+  const convertHeight = (cm: number, toUnit: "cm" | "in") => {
+    return toUnit === "in" ? Math.round(cm / 2.54 * 10) / 10 : cm;
+  };
+
+  const displayWeight = () => {
+    const kg = parseFloat(formData.weightKg);
+    if (!kg || kg <= 0) return "";
+    return convertWeight(kg, weightUnit).toString();
+  };
+
+  const displayHeight = () => {
+    const cm = parseFloat(formData.heightCm);
+    if (!cm || cm <= 0) return "";
+    return convertHeight(cm, heightUnit).toString();
+  };
 
   // Load profile data into form
   useEffect(() => {
@@ -80,9 +103,21 @@ export function Profile() {
     e.preventDefault();
 
     try {
+      // Convert values to metric (cm/kg) before saving
+      let heightCmValue = formData.heightCm ? parseFloat(formData.heightCm) : undefined;
+      let weightKgValue = formData.weightKg ? parseFloat(formData.weightKg) : undefined;
+      
+      // If user entered values in non-metric units, convert them to metric
+      if (heightCmValue && heightUnit === "in") {
+        heightCmValue = heightCmValue * 2.54;
+      }
+      if (weightKgValue && weightUnit === "lbs") {
+        weightKgValue = weightKgValue / 2.20462;
+      }
+
       await updateProfile.mutateAsync({
-        heightCm: formData.heightCm ? parseFloat(formData.heightCm) : undefined,
-        weightKg: formData.weightKg ? parseFloat(formData.weightKg) : undefined,
+        heightCm: heightCmValue,
+        weightKg: weightKgValue,
         ageYears: formData.ageYears ? parseInt(formData.ageYears) : undefined,
         fitnessGoal: (formData.fitnessGoal as "lose_fat" | "build_muscle" | "maintain") || undefined,
       });
@@ -132,38 +167,68 @@ export function Profile() {
           {/* Biometric Data Card */}
           <Card className="border border-white/10 bg-slate-950">
             <CardHeader>
-              <CardTitle className="text-white">Biometric Data</CardTitle>
-              <CardDescription>Enter your height, weight, and age for BMI calculation</CardDescription>
+              <div className="flex justify-between items-start">
+                <div>
+                  <CardTitle className="text-white">Biometric Data</CardTitle>
+                  <CardDescription>Enter your height, weight, and age for BMI calculation</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWeightUnit(weightUnit === "kg" ? "lbs" : "kg")}
+                    className="px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-400/30"
+                  >
+                    {weightUnit === "kg" ? "Switch to lbs" : "Switch to kg"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHeightUnit(heightUnit === "cm" ? "in" : "cm")}
+                    className="px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-400/30"
+                  >
+                    {heightUnit === "cm" ? "Switch to in" : "Switch to cm"}
+                  </button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="heightCm" className="text-slate-300">
-                    Height (cm)
+                    Height ({heightUnit})
                   </Label>
-                  <Input
-                    id="heightCm"
-                    name="heightCm"
-                    type="number"
-                    placeholder="170"
-                    value={formData.heightCm}
-                    onChange={handleInputChange}
-                    className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
-                  />
+                  <div className="flex gap-2 mt-2">
+                    <Input
+                      id="heightCm"
+                      name="heightCm"
+                      type="number"
+                      placeholder={heightUnit === "cm" ? "170" : "67"}
+                      value={formData.heightCm}
+                      onChange={handleInputChange}
+                      className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
+                    />
+                    <div className="flex items-center px-3 py-2 rounded-md bg-slate-900 border border-white/10 text-slate-400 text-sm">
+                      {displayHeight()} {heightUnit}
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="weightKg" className="text-slate-300">
-                    Weight (kg)
+                    Weight ({weightUnit})
                   </Label>
-                  <Input
-                    id="weightKg"
-                    name="weightKg"
-                    type="number"
-                    placeholder="70"
-                    value={formData.weightKg}
-                    onChange={handleInputChange}
-                    className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
-                  />
+                  <div className="flex gap-2 mt-2">
+                    <Input
+                      id="weightKg"
+                      name="weightKg"
+                      type="number"
+                      placeholder={weightUnit === "kg" ? "70" : "154"}
+                      value={formData.weightKg}
+                      onChange={handleInputChange}
+                      className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
+                    />
+                    <div className="flex items-center px-3 py-2 rounded-md bg-slate-900 border border-white/10 text-slate-400 text-sm">
+                      {displayWeight()} {weightUnit}
+                    </div>
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="ageYears" className="text-slate-300">
