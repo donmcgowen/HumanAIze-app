@@ -21,7 +21,7 @@ interface CredentialDialogProps {
 }
 
 const credentialConfigs: Record<string, { fields: Array<{ key: string; label: string; type: string; placeholder: string; required: boolean }> }> = {
-  dexcom: {
+  "dexcom-cgm": {
     fields: [
       {
         key: "accessToken",
@@ -39,7 +39,7 @@ const credentialConfigs: Record<string, { fields: Array<{ key: string; label: st
       },
     ],
   },
-  glooko: {
+  "glooko": {
     fields: [
       {
         key: "apiKey",
@@ -204,7 +204,19 @@ export function CredentialDialog({ open, onOpenChange, source, onSubmit, isLoadi
   const [showPasswords, setShowPasswords] = useState<Record<string, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  const sourceKey = source.displayName.toLowerCase().replace(/\s+/g, "-");
+  // Map display names to config keys
+  const sourceKeyMap: Record<string, string> = {
+    "Dexcom CGM": "dexcom",
+    "Glooko": "glooko",
+    "Fitbit": "fitbit",
+    "Google Fit": "google-fit",
+    "Apple Health": "apple-health",
+    "MyFitnessPal": "myfitnesspal",
+    "Cronometer": "cronometer",
+    "Oura": "oura",
+    "Custom App": "custom-app",
+  };
+  const sourceKey = sourceKeyMap[source.displayName] || source.displayName.toLowerCase().replace(/\s+/g, "-");
   const config = credentialConfigs[sourceKey];
 
   if (!config) {

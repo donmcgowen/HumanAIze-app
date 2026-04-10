@@ -9,9 +9,10 @@
 - [x] Add date-range filtering for historical trend exploration across all major health metrics.
 - [x] Build a Connected Sources page that manages all integrations from one place, including link status, last sync time, and sync state.
 - [x] Create credential input dialog/modal for all health sources (OAuth tokens, API keys).
-- [ ] Add live credential validation testing before marking sources as connected (test against real APIs).
-- [ ] Implement real Dexcom OAuth token validation with live API testing.
-- [ ] Implement real Glooko API key validation with live API testing.
+- [x] Add live credential validation testing before marking sources as connected (test against real APIs).
+- [x] Implement real Dexcom OAuth token validation with live API testing.
+- [x] Implement real Glooko API key validation with live API testing.
+- [x] Fix credential dialog rendering - "Credential configuration not available" error when opening Dexcom dialog.
 - [ ] Test end-user connection flow with real Dexcom credentials.
 - [ ] Test end-user connection flow with real Glooko credentials.
 - [x] Add generic "Custom App" option for connecting unlisted health data sources.
