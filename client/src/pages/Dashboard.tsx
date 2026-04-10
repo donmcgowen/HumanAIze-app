@@ -1,16 +1,13 @@
-import { trpc } from "@/lib/trpc";
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } from "recharts";
-import { Activity, AlertCircle, CheckCircle2, Clock, Zap, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { useLocation } from "wouter";
 import { useEffect, useState } from "react";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { Activity, Clock, Zap, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { trpc } from "@/lib/trpc";
 
 export default function Dashboard() {
-  const [, setLocation] = useLocation();
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
-  const { data: dashboard, isLoading, error } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
+  const { data: dashboard, isLoading } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   useEffect(() => {
     if (syncData?.lastSyncTime) {
@@ -27,182 +24,193 @@ export default function Dashboard() {
         const diffHours = Math.floor(diffMins / 60);
         setLastSyncTime(`${diffHours}h ago`);
       }
-
-      setSyncStatus(syncData.lastSyncStatus === "success" ? "success" : "error");
     }
   }, [syncData]);
 
   if (isLoading) {
     return (
-      <div className="space-y-8">
-        <div className="grid gap-4 md:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="tech-stat animate-pulse">
-              <div className="h-3 w-20 bg-white/10" />
-              <div className="h-8 w-32 bg-white/10" />
-            </div>
-          ))}
-        </div>
-        <div className="tech-chart-container animate-pulse h-80" />
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-slate-400">Loading dashboard...</div>
       </div>
     );
   }
 
-  if (error || !dashboard) {
+  if (!dashboard) {
     return (
-      <div className="tech-card flex items-center gap-4 border-red-500/30 bg-red-500/5">
-        <AlertCircle className="h-6 w-6 text-red-300" />
-        <div>
-          <p className="font-semibold text-red-200">Failed to load dashboard</p>
-          <p className="text-sm text-red-300/70">{error?.message || "Unknown error"}</p>
-        </div>
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-slate-400">No data available</div>
       </div>
     );
   }
 
-  const { chart, summary, insights, sourcesByCategory } = dashboard;
+  const { summary, chart, sourcesByCategory } = dashboard;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 p-6">
       {/* Header */}
-      <div className="border-b border-white/10 pb-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="tech-label">Real-time unified analytics</p>
-            <h1 className="tech-heading mt-2 text-3xl">Command Center</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-              Unified glucose, activity, nutrition, and sleep metrics from your connected sources. Explore trends, correlations, and AI-generated insights across your metabolic health.
-            </p>
-          </div>
-          {lastSyncTime && (
-            <div className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs">
-              {syncStatus === "success" ? (
-                <CheckCircle2 className="h-4 w-4 text-green-400" />
-              ) : syncStatus === "error" ? (
-                <AlertCircle className="h-4 w-4 text-red-400" />
-              ) : (
-                <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
-              )}
-              <span className="text-slate-300">
-                Last sync: <span className="font-semibold">{lastSyncTime}</span>
-              </span>
-            </div>
-          )}
-        </div>
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold">Command Center</h1>
+        <p className="text-slate-400">
+          Unified glucose, activity, nutrition, and sleep metrics from your connected sources.
+        </p>
+        {lastSyncTime && (
+          <p className="text-sm text-slate-500">Last sync: {lastSyncTime}</p>
+        )}
       </div>
 
-      {/* Key Metrics */}
+      {/* Key Metrics Grid */}
       <div className="grid gap-4 md:grid-cols-4">
-        <div className="tech-stat">
-          <span className="tech-stat-label">Glucose average</span>
-          <span className="tech-stat-value">{summary.glucoseAverage}</span>
-          <span className="text-xs text-slate-400">mg/dL</span>
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Glucose Average</div>
+          <div className="text-3xl font-bold">{summary.glucoseAverage.toFixed(1)}</div>
+          <div className="text-xs text-slate-500 mt-1">mg/dL</div>
         </div>
-        <div className="tech-stat">
-          <span className="tech-stat-label">Time in range</span>
-          <span className="tech-stat-value">{summary.timeInRangeEstimate}%</span>
-          <span className="text-xs text-slate-400">80–160 mg/dL</span>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Time in Range</div>
+          <div className="text-3xl font-bold">{summary.timeInRangeEstimate}%</div>
+          <div className="text-xs text-slate-500 mt-1">80–160 mg/dL</div>
         </div>
-        <div className="tech-stat">
-          <span className="tech-stat-label">Sleep average</span>
-          <span className="tech-stat-value">{summary.sleepAverage}h</span>
-          <span className="text-xs text-slate-400">per night</span>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Sleep Average</div>
+          <div className="text-3xl font-bold">{summary.sleepAverage.toFixed(1)}h</div>
+          <div className="text-xs text-slate-500 mt-1">per night</div>
         </div>
-        <div className="tech-stat">
-          <span className="tech-stat-label">Steps average</span>
-          <span className="tech-stat-value">{summary.stepsAverage.toLocaleString()}</span>
-          <span className="text-xs text-slate-400">daily</span>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Steps Average</div>
+          <div className="text-3xl font-bold">{summary.stepsAverage.toLocaleString()}</div>
+          <div className="text-xs text-slate-500 mt-1">daily</div>
         </div>
       </div>
 
-      {/* Unified Metrics Chart */}
-      <div className="tech-chart-container">
-        <p className="tech-label mb-4">14-day unified metric window</p>
-        <ResponsiveContainer width="100%" height={400}>
-          <ComposedChart data={chart}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="label" stroke="rgba(255,255,255,0.4)" style={{ fontSize: "12px" }} />
-            <YAxis yAxisId="left" stroke="rgba(255,255,255,0.4)" style={{ fontSize: "12px" }} />
-            <YAxis yAxisId="right" orientation="right" stroke="rgba(255,255,255,0.4)" style={{ fontSize: "12px" }} />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "rgba(10,14,20,0.95)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: "0",
-              }}
-              labelStyle={{ color: "rgba(255,255,255,0.8)" }}
-            />
-            <Legend wrapperStyle={{ paddingTop: "16px" }} />
-            <Line yAxisId="left" type="monotone" dataKey="glucose" stroke="#22d3ee" name="Glucose (mg/dL)" strokeWidth={2} dot={false} />
-            <Bar yAxisId="right" dataKey="steps" fill="rgba(34,211,238,0.2)" name="Steps" />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Connected Sources Status */}
-      <div className="tech-card">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <p className="tech-label">Integration status</p>
-            <h3 className="tech-heading mt-2">Connected Sources</h3>
-          </div>
-          <Button onClick={() => setLocation("/sources")} className="tech-button-secondary">
-            Manage sources
-          </Button>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          {["glucose", "activity", "nutrition", "sleep"].map((category) => {
-            const sources = sourcesByCategory[category as keyof typeof sourcesByCategory] || [];
-            const connected = sources.filter((s) => s.status === "connected").length;
-            return (
-              <div key={category} className="flex items-center justify-between border border-white/10 bg-white/[0.02] p-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-400">{category}</p>
-                  <p className="mt-1 text-sm font-semibold text-white">{connected} connected</p>
-                </div>
-                {connected > 0 ? (
-                  <CheckCircle2 className="h-5 w-5 text-cyan-300" />
-                ) : (
-                  <AlertCircle className="h-5 w-5 text-slate-500" />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* AI Insights */}
-      {insights.length > 0 && (
-        <div className="tech-card">
-          <div className="mb-4">
-            <p className="tech-label">Intelligent analysis</p>
-            <h3 className="tech-heading mt-2">Top insights</h3>
-          </div>
-          <div className="space-y-3">
-            {insights.map((insight, index) => (
-              <div key={index} className="flex gap-3 border-l-2 border-cyan-300/40 pl-4 py-2">
-                <div className="flex-shrink-0 pt-1">
-                  {insight.severity === "priority" && <Zap className="h-4 w-4 text-red-300" />}
-                  {insight.severity === "watch" && <AlertCircle className="h-4 w-4 text-yellow-300" />}
-                  {insight.severity === "info" && <Activity className="h-4 w-4 text-cyan-300" />}
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-white">{insight.title}</p>
-                  <p className="mt-1 text-sm text-slate-300">{insight.summary}</p>
-                  <p className="mt-2 text-xs text-cyan-300/70">{insight.recommendation}</p>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Chart */}
+      {chart && chart.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-6">
+          <h2 className="text-lg font-semibold mb-4">14-Day Glucose Trend</h2>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={chart}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis dataKey="label" stroke="#94a3b8" />
+              <YAxis stroke="#94a3b8" />
+              <Tooltip 
+                contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #475569" }}
+                labelStyle={{ color: "#e2e8f0" }}
+              />
+              <Legend />
+              <Line 
+                type="monotone" 
+                dataKey="glucose" 
+                stroke="#3b82f6" 
+                dot={false}
+                name="Glucose (mg/dL)"
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
 
-      {/* Sync Status */}
-      <div className="tech-card flex items-center gap-4">
-        <Clock className="h-5 w-5 text-slate-400" />
-        <div>
-          <p className="text-sm font-semibold text-white">Last sync status</p>
-          <p className="text-xs text-slate-400 capitalize">{summary.syncState} — {summary.connectedSourceCount} active sources</p>
+      {/* Connected Sources */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Zap className="w-4 h-4" />
+            Glucose Sources
+          </h3>
+          <div className="space-y-2">
+            {sourcesByCategory.glucose.length > 0 ? (
+              sourcesByCategory.glucose.map((source) => (
+                <div key={source.id} className="text-sm text-slate-300">
+                  {source.displayName}
+                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
+                    source.status === "connected" 
+                      ? "bg-green-900 text-green-200" 
+                      : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {source.status}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-500">No sources connected</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Activity className="w-4 h-4" />
+            Activity Sources
+          </h3>
+          <div className="space-y-2">
+            {sourcesByCategory.activity.length > 0 ? (
+              sourcesByCategory.activity.map((source) => (
+                <div key={source.id} className="text-sm text-slate-300">
+                  {source.displayName}
+                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
+                    source.status === "connected" 
+                      ? "bg-green-900 text-green-200" 
+                      : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {source.status}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-500">No sources connected</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Clock className="w-4 h-4" />
+            Sleep Sources
+          </h3>
+          <div className="space-y-2">
+            {sourcesByCategory.sleep.length > 0 ? (
+              sourcesByCategory.sleep.map((source) => (
+                <div key={source.id} className="text-sm text-slate-300">
+                  {source.displayName}
+                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
+                    source.status === "connected" 
+                      ? "bg-green-900 text-green-200" 
+                      : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {source.status}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-500">No sources connected</div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Zap className="w-4 h-4" />
+            Nutrition Sources
+          </h3>
+          <div className="space-y-2">
+            {sourcesByCategory.nutrition.length > 0 ? (
+              sourcesByCategory.nutrition.map((source) => (
+                <div key={source.id} className="text-sm text-slate-300">
+                  {source.displayName}
+                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
+                    source.status === "connected" 
+                      ? "bg-green-900 text-green-200" 
+                      : "bg-slate-800 text-slate-400"
+                  }`}>
+                    {source.status}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="text-sm text-slate-500">No sources connected</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
