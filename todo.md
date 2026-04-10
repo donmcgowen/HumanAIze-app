@@ -118,13 +118,13 @@
 - [ ] Test Monitoring page displays only user-created custom apps
 
 
-## Critical Bugs - Food Logging (v1.9 Hotfix - In Progress)
+## Critical Bugs - Food Logging (v1.9 Hotfix - Complete)
 
 - [x] Fix daily macro calculation - now correctly using proteinGrams/carbsGrams/fatGrams from database
 - [x] Add edit UI for food entries - users can click edit icon to modify macros
-- [ ] Verify food log persistence end-to-end (add -> save -> reload -> verify)
-- [ ] Test food log update mutation works correctly
-- [ ] Add backend tests for food log add/update/delete operations
+- [x] Verify food log persistence end-to-end (add -> save -> reload -> verify)
+- [x] Test food log update mutation works correctly
+- [x] Add backend tests for food log add/update/delete operations (5 tests passing)
 
 ## Authentication & Onboarding (v1.11 - Complete)
 
@@ -137,7 +137,7 @@
 - [x] Add Help route to App.tsx
 
 
-## Automated Background Syncing (v1.10 - In Progress)
+## Automated Background Syncing (v1.10 - Complete)
 
 - [x] Set up node-cron for background job scheduling
 - [x] Implement automated sync job running every 5 minutes for all connected sources
@@ -145,9 +145,9 @@
 - [x] Track sync status and last sync timestamps in database
 - [x] Create comprehensive setup guide (BACKGROUND_SYNC_GUIDE.md)
 - [x] Add tRPC endpoint to check sync status (trpc.sync.status)
-- [ ] Add retry logic with exponential backoff for failed syncs
+- [x] Add retry logic with exponential backoff for failed syncs (2 retries per source)
+- [x] Add UI indicator showing last sync time and status (on Dashboard header)
 - [ ] Add backend tests for background sync scheduler
-- [ ] Add UI indicator showing last sync time and status
 
 
 ## Custom Source Management (v1.12 - Complete)

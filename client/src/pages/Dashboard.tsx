@@ -1,12 +1,36 @@
 import { trpc } from "@/lib/trpc";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart } from "recharts";
-import { Activity, AlertCircle, CheckCircle2, Clock, Zap } from "lucide-react";
+import { Activity, AlertCircle, CheckCircle2, Clock, Zap, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
+import { useEffect, useState } from "react";
 
 export default function Dashboard() {
   const [, setLocation] = useLocation();
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<"idle" | "syncing" | "success" | "error">("idle");
   const { data: dashboard, isLoading, error } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
+  const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
+
+  useEffect(() => {
+    if (syncData?.lastSyncTime) {
+      const lastSync = new Date(syncData.lastSyncTime);
+      const now = new Date();
+      const diffMs = now.getTime() - lastSync.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+
+      if (diffMins < 1) {
+        setLastSyncTime("Just now");
+      } else if (diffMins < 60) {
+        setLastSyncTime(`${diffMins}m ago`);
+      } else {
+        const diffHours = Math.floor(diffMins / 60);
+        setLastSyncTime(`${diffHours}h ago`);
+      }
+
+      setSyncStatus(syncData.lastSyncStatus === "success" ? "success" : "error");
+    }
+  }, [syncData]);
 
   if (isLoading) {
     return (
@@ -42,11 +66,29 @@ export default function Dashboard() {
     <div className="space-y-8">
       {/* Header */}
       <div className="border-b border-white/10 pb-6">
-        <p className="tech-label">Real-time unified analytics</p>
-        <h1 className="tech-heading mt-2 text-3xl">Command Center</h1>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-          Unified glucose, activity, nutrition, and sleep metrics from your connected sources. Explore trends, correlations, and AI-generated insights across your metabolic health.
-        </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="tech-label">Real-time unified analytics</p>
+            <h1 className="tech-heading mt-2 text-3xl">Command Center</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+              Unified glucose, activity, nutrition, and sleep metrics from your connected sources. Explore trends, correlations, and AI-generated insights across your metabolic health.
+            </p>
+          </div>
+          {lastSyncTime && (
+            <div className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs">
+              {syncStatus === "success" ? (
+                <CheckCircle2 className="h-4 w-4 text-green-400" />
+              ) : syncStatus === "error" ? (
+                <AlertCircle className="h-4 w-4 text-red-400" />
+              ) : (
+                <RefreshCw className="h-4 w-4 animate-spin text-blue-400" />
+              )}
+              <span className="text-slate-300">
+                Last sync: <span className="font-semibold">{lastSyncTime}</span>
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Key Metrics */}
