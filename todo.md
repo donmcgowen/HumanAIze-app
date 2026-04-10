@@ -124,6 +124,16 @@
 - [ ] Fix daily macro calculation - summary shows 0.0g for protein/carbs/fat
 - [ ] Add edit functionality for food entries - users should be able to edit quantity/unit
 
+## Authentication & Onboarding (v1.11 - Complete)
+
+- [x] Add login/signup UI to Home page when not authenticated
+- [x] Create dedicated Help page with comprehensive guides
+- [x] Add Help menu item to DashboardLayout sidebar
+- [x] Create sources connection guide (4-step process)
+- [x] Create app usage guide for all features
+- [x] Add FAQs and privacy/security information
+- [x] Add Help route to App.tsx
+
 
 ## Automated Background Syncing (v1.10 - In Progress)
 

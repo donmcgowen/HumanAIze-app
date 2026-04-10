@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FOOD_DATABASE, calculateMacros, searchFoods } from "@/../../shared/foodDatabase";
 import { toast } from "sonner";
-import { Plus, Trash2, Search } from "lucide-react";
+import { Plus, Trash2, Search, Edit2, Check, X } from "lucide-react";
 
 export function FoodLogger() {
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({

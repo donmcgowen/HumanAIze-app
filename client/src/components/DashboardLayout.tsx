@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Activity, Bot, Cable, LayoutDashboard, LineChart, LogOut, Mail, User, Apple, Dumbbell } from "lucide-react";
+import { Activity, Bot, Cable, LayoutDashboard, LineChart, LogOut, Mail, User, Apple, Dumbbell, HelpCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -34,6 +34,7 @@ const menuItems = [
   { icon: User, label: "Profile", path: "/profile" },
   { icon: Bot, label: "Assistant", path: "/assistant" },
   { icon: Mail, label: "Weekly Summaries", path: "/summaries" },
+  { icon: HelpCircle, label: "Help", path: "/help" },
 ];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {

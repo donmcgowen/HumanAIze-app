@@ -14,6 +14,7 @@ import { Profile } from "./pages/Profile";
 import { FoodLogging } from "./pages/FoodLogging";
 import { Workouts } from "./pages/Workouts";
 import { Monitoring } from "./pages/Monitoring";
+import { Help } from "./pages/Help";
 
 function Router() {
   return (
@@ -28,6 +29,7 @@ function Router() {
       <Route path={"/profile"} component={() => <DashboardLayout><Profile /></DashboardLayout>} />
       <Route path={"/assistant"} component={() => <DashboardLayout><Assistant /></DashboardLayout>} />
       <Route path={"/summaries"} component={() => <DashboardLayout><Summaries /></DashboardLayout>} />
+      <Route path={"/help"} component={() => <DashboardLayout><Help /></DashboardLayout>} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

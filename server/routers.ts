@@ -138,6 +138,24 @@ export const appRouter = router({
         })
       )
       .mutation(({ ctx, input }) => deleteFoodLog(input.foodLogId, ctx.user.id)),
+    updateLog: protectedProcedure
+      .input(
+        z.object({
+          foodLogId: z.number().int().positive(),
+          foodName: z.string().min(1).optional(),
+          servingSize: z.string().optional(),
+          calories: z.number().int().positive().optional(),
+          proteinGrams: z.number().positive().optional(),
+          carbsGrams: z.number().positive().optional(),
+          fatGrams: z.number().positive().optional(),
+          mealType: z.enum(["breakfast", "lunch", "dinner", "snack", "other"]).optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(({ ctx, input }) => {
+        const { foodLogId, ...updates } = input;
+        return updateFoodLog(foodLogId, ctx.user.id, updates);
+      }),
   }),
   sync: router({
     status: protectedProcedure.query(() => getSyncStatus()),
