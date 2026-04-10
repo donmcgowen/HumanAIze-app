@@ -1,0 +1,23 @@
+# Project TODO
+
+- [x] Define the first-version scope and implementation boundaries for the AI-powered personal health intelligence platform.
+- [x] Research feasible integration methods and product constraints for Dexcom, Glooko, Apple Health, Google Fit, Fitbit, MyFitnessPal, Cronometer, and Oura.
+- [x] Extend the database schema for health sources, sync jobs, glucose readings, activity metrics, nutrition logs, sleep sessions, AI insights, chat history, and weekly summaries.
+- [x] Build protected application routes and dashboard access using the existing account system.
+- [x] Create a blueprint-inspired dark visual system with deep royal blue backgrounds, faint grid overlays, white technical framing, and bold sans-serif typography.
+- [x] Build a unified dashboard that shows glucose, activity, nutrition, and sleep in one view with interactive charts.
+- [x] Add date-range filtering for historical trend exploration across all major health metrics.
+- [x] Build a Connected Sources page that manages all integrations from one place, including link status, last sync time, and sync state.
+- [ ] Implement Dexcom OAuth connection flow and glucose data import scaffolding.
+- [ ] Implement Glooko connection flow and diabetes management data import scaffolding.
+- [ ] Implement fitness source connection and import scaffolding for Apple Health, Google Fit, and Fitbit.
+- [ ] Implement food logging connection and import scaffolding for MyFitnessPal and Cronometer.
+- [ ] Implement sleep source connection and import scaffolding for Oura, Fitbit, and Apple Health.
+- [ ] Build a unified normalization layer that maps imported source data into shared metric models.
+- [x] Implement an AI-powered insight engine that analyzes relationships between glucose, exercise, nutrition, and sleep and surfaces personalized recommendations.
+- [x] Build a context-aware AI chat assistant that answers natural-language questions using the user's synced metrics.
+- [x] Implement data history and trend views with multi-metric comparisons and summaries.
+- [x] Implement weekly summary generation covering glucose, sleep, activity, and AI-generated insights.
+- [ ] Implement automated weekly email delivery orchestration and summary status tracking.
+- [ ] Add backend tests for core data aggregation, insight generation behavior, and protected procedures.
+- [ ] Validate the app, document required third-party credentials and integration limitations, and prepare the first delivery checkpoint.
