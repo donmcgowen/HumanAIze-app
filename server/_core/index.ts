@@ -7,6 +7,7 @@ import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
+import { startBackgroundSync } from "../backgroundSync";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -60,6 +61,13 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // Start background sync scheduler (every 5 minutes)
+  try {
+    await startBackgroundSync(5);
+  } catch (error) {
+    console.error("Failed to start background sync:", error);
+  }
 }
 
 startServer().catch(console.error);

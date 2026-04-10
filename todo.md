@@ -109,3 +109,30 @@
 - [x] Implement automated macro calculator based on food selection and quantity
 - [x] Update FoodLogger with searchable food dropdown and quantity input with unit selector
 - [x] Test food logging with various foods and auto-calculated macros (Chicken Breast 3oz = 26.5g protein, 3.1g fat, 0g carbs, 140 cal)
+
+
+## New Requests (v1.9 Cleanup)
+
+- [ ] Remove pre-configured sources (Dexcom, Fitbit, Apple Health, Oura, Google Fit) from Monitoring page
+- [ ] Filter sources list to show only custom_app provider entries
+- [ ] Test Monitoring page displays only user-created custom apps
+
+
+## Critical Bugs - Food Logging (v1.9 Hotfix)
+
+- [ ] Fix food log entry persistence - entries not saving to database
+- [ ] Fix daily macro calculation - summary shows 0.0g for protein/carbs/fat
+- [ ] Add edit functionality for food entries - users should be able to edit quantity/unit
+
+
+## Automated Background Syncing (v1.10 - In Progress)
+
+- [x] Set up node-cron for background job scheduling
+- [x] Implement automated sync job running every 5 minutes for all connected sources
+- [x] Add error handling and logging for failed syncs
+- [x] Track sync status and last sync timestamps in database
+- [x] Create comprehensive setup guide (BACKGROUND_SYNC_GUIDE.md)
+- [x] Add tRPC endpoint to check sync status (trpc.sync.status)
+- [ ] Add retry logic with exponential backoff for failed syncs
+- [ ] Add backend tests for background sync scheduler
+- [ ] Add UI indicator showing last sync time and status

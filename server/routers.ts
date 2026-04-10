@@ -19,7 +19,8 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, deleteFoodLog } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, deleteFoodLog, updateFoodLog } from "./db";
+import { getSyncStatus } from "./backgroundSync";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
@@ -137,6 +138,9 @@ export const appRouter = router({
         })
       )
       .mutation(({ ctx, input }) => deleteFoodLog(input.foodLogId, ctx.user.id)),
+  }),
+  sync: router({
+    status: protectedProcedure.query(() => getSyncStatus()),
   }),
 });
 

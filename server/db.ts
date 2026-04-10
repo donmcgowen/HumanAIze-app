@@ -206,3 +206,23 @@ export async function deleteFoodLog(foodLogId: number, userId: number): Promise<
   await db.delete(foodLogs).where(and(eq(foodLogs.id, foodLogId), eq(foodLogs.userId, userId)));
   return true;
 }
+
+export async function updateFoodLog(
+  foodLogId: number,
+  userId: number,
+  updates: Partial<Omit<InsertFoodLog, 'userId'>>
+): Promise<FoodLog> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available");
+  }
+
+  await db
+    .update(foodLogs)
+    .set(updates)
+    .where(and(eq(foodLogs.id, foodLogId), eq(foodLogs.userId, userId)));
+
+  const updated = await db.select().from(foodLogs).where(eq(foodLogs.id, foodLogId)).limit(1);
+  if (!updated || updated.length === 0) throw new Error("Failed to update food log");
+  return updated[0];
+}

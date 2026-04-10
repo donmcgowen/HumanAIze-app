@@ -125,7 +125,6 @@ export function Monitoring() {
                       </div>
                     </div>
 
-                    {/* Expanded Details */}
                     {expandedSourceId === source.id.toString() && (
                       <div className="mt-4 pt-4 border-t border-slate-700 space-y-3">
                         {source.lastSyncAt && (

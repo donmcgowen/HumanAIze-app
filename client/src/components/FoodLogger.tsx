@@ -101,9 +101,9 @@ export function FoodLogger() {
     if (!foodLogs) return { protein: 0, carbs: 0, fat: 0, calories: 0 };
     return foodLogs.reduce(
       (acc: any, log: any) => ({
-        protein: acc.protein + (log.protein || 0),
-        carbs: acc.carbs + (log.carbs || 0),
-        fat: acc.fat + (log.fat || 0),
+        protein: acc.protein + (log.proteinGrams || 0),
+        carbs: acc.carbs + (log.carbsGrams || 0),
+        fat: acc.fat + (log.fatGrams || 0),
         calories: acc.calories + (log.calories || 0),
       }),
       { protein: 0, carbs: 0, fat: 0, calories: 0 }
@@ -269,7 +269,7 @@ export function FoodLogger() {
                   <div className="flex-1">
                     <div className="font-medium text-white">{log.foodName}</div>
                     <div className="text-xs text-slate-400">
-                      P: {log.protein}g | C: {log.carbs}g | F: {log.fat}g | {log.calories} cal
+                      P: {log.proteinGrams}g | C: {log.carbsGrams}g | F: {log.fatGrams}g | {log.calories} cal
                     </div>
                   </div>
                   <Button
