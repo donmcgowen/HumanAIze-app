@@ -1,0 +1,3 @@
+ALTER TABLE `health_sources` MODIFY COLUMN `provider` enum('dexcom','glooko','fitbit','google_fit','apple_health','myfitnesspal','cronometer','oura','custom_app') NOT NULL;--> statement-breakpoint
+ALTER TABLE `health_sources` MODIFY COLUMN `implementationStage` enum('direct_oauth','partner_required','native_bridge','legacy','planned','custom') NOT NULL;--> statement-breakpoint
+ALTER TABLE `health_sources` MODIFY COLUMN `authType` enum('oauth2','partner','native_bridge','manual','legacy','custom') NOT NULL;

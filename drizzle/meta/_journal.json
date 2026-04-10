@@ -15,6 +15,13 @@
       "when": 1775767656329,
       "tag": "0001_new_post",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1775839150994,
+      "tag": "0002_complete_havok",
+      "breakpoints": true
     }
   ]
 }

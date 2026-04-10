@@ -106,14 +106,7 @@ function validateCredentials(sourceName: string, credentials: Record<string, str
       }
       break;
 
-    case "glooko":
-      if (!credentials.apiKey || credentials.apiKey.trim().length === 0) {
-        throw new Error("Glooko API key is required");
-      }
-      if (!credentials.apiSecret || credentials.apiSecret.trim().length === 0) {
-        throw new Error("Glooko API secret is required");
-      }
-      break;
+
 
     case "fitbit":
       if (!credentials.accessToken || credentials.accessToken.trim().length === 0) {
@@ -131,15 +124,28 @@ function validateCredentials(sourceName: string, credentials: Record<string, str
       break;
 
 
-
     case "google-fit":
       if (!credentials.accessToken || credentials.accessToken.trim().length === 0) {
         throw new Error("Google Fit access token is required");
       }
       break;
 
+    case "custom-app":
+      // Custom app can accept any credentials format
+      if (!credentials.credentials || credentials.credentials.trim().length === 0) {
+        throw new Error("Credentials are required for custom app");
+      }
+      break;
+
+    case "apple-health":
+      // Apple Health is a native bridge, no credentials needed
+      break;
+
     default:
-      throw new Error(`Unknown source type: ${sourceName}`);
+      // For unknown sources, just require that some credentials are provided
+      if (!credentials || Object.keys(credentials).length === 0) {
+        throw new Error(`Credentials are required for ${sourceName}`);
+      }
   }
 }
 
@@ -156,6 +162,10 @@ function getCredentialType(sourceName: string): string {
     return "oauth";
   } else if (apiKeySources.includes(sourceKey)) {
     return "api_key";
+  } else if (sourceKey === "custom-app") {
+    return "custom";
+  } else if (sourceKey === "apple-health") {
+    return "native_bridge";
   } else {
     return "unknown";
   }
@@ -180,8 +190,16 @@ export async function testSourceCredentials(
         return await testFitbitCredentials(credentials);
       case "oura":
         return await testOuraCredentials(credentials);
+      case "custom-app":
+        // Custom app credentials are accepted as-is (user is responsible for validity)
+        console.log(`Custom app credentials stored: ${credentials.appName || "Unknown"}`);
+        return true;
+      case "apple-health":
+        // Native bridge, no API test needed
+        return true;
       default:
         // For sources without test implementation, assume valid
+        console.log(`No credential test available for ${sourceName}, accepting as valid`);
         return true;
     }
   } catch (error) {
@@ -214,30 +232,7 @@ async function testDexcomCredentials(credentials: Record<string, string>): Promi
   }
 }
 
-async function testGlookoCredentials(credentials: Record<string, string>): Promise<boolean> {
-  try {
-    console.log("Testing Glooko credentials...");
-    const response = await fetch("https://api.glooko.com/v1/users", {
-      method: "GET",
-      headers: {
-        "X-API-Key": credentials.apiKey || "",
-        "X-API-Secret": credentials.apiSecret || "",
-        "Content-Type": "application/json",
-      },
-    });
-    console.log(`Glooko API response: ${response.status} ${response.statusText}`);
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Glooko error: ${errorText}`);
-      return false;
-    }
-    console.log("✓ Glooko credentials are valid");
-    return true;
-  } catch (error) {
-    console.error("Glooko credential test failed:", error);
-    return false;
-  }
-}
+
 
 async function testFitbitCredentials(credentials: Record<string, string>): Promise<boolean> {
   try {

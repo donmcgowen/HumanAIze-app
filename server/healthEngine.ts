@@ -63,6 +63,15 @@ const SOURCE_BLUEPRINTS = [
     displayName: "Google Fit",
     description: "Activity connector (note: Google Fit API is deprecated for new apps).",
   },
+  {
+    provider: "custom_app",
+    category: "multi",
+    status: "ready",
+    implementationStage: "custom",
+    authType: "custom",
+    displayName: "Custom App",
+    description: "Connect any health data source with custom credentials (API keys, OAuth tokens, etc.).",
+  },
 ] as const;
 
 function startOfDay(timestamp: number) {
@@ -111,7 +120,7 @@ export async function ensureSeedDataForUser(userId: number) {
         lastSyncStatus: source.status === "connected" ? ("success" as const) : ("idle" as const),
         metadata: {
           supportedMetrics:
-            source.provider === "dexcom"
+            source.provider === "dexcom" || source.provider === "custom_app"
               ? ["glucose", "trend"]
               : source.provider === "fitbit"
                 ? ["steps", "workouts", "sleep"]

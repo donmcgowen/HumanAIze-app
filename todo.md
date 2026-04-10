@@ -31,3 +31,11 @@
 - [x] Add backend tests for core health analytics logic (27 pure math tests pass; DB integration tests scaffolded).
 - [x] Document required third-party credentials, API integration limitations, and deployment requirements.
 - [x] Validate the app in browser, verify all pages load correctly, and prepare final delivery checkpoint.
+
+## New Requests (v1.1 Enhancement)
+
+- [x] Implement generic custom connector for any health data source (user-defined source name + credential type)
+- [x] Remove partner secret dependency from Dexcom validation - use only user OAuth token
+- [x] Update Connected Sources UI to prominently feature custom connector option
+- [x] Test end-to-end custom connector flow with sample credentials
+- [x] Test Dexcom connection with regular user OAuth token (no partner secret)
