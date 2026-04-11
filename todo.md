@@ -498,3 +498,8 @@
 - [x] Test camera opens and captures photo correctly
 - [x] Test voice/text description input after photo capture
 - [x] Test Gemini ready to use description for macro refinement
+
+
+## Feature - AI Food Scanner (v1.37 - SKIPPED)
+
+Note: Modal rendering issue encountered. Feature skipped for now. Can be revisited later with alternative approach (e.g., separate page route instead of modal).

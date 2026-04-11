@@ -1,9 +1,8 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -36,6 +35,7 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
   const [stage, setStage] = useState<'camera' | 'preview' | 'description'>('camera');
   const [photoData, setPhotoData] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
   const [textDescription, setTextDescription] = useState('');
@@ -53,24 +53,58 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
     },
   });
 
-  // Initialize camera
+  // Initialize camera when modal opens
   useEffect(() => {
-    if (!isOpen || stage !== 'camera' || cameraActive) return;
+    if (!isOpen || stage !== 'camera') {
+      return;
+    }
 
     const initCamera = async () => {
       try {
+        console.log('[AIFoodScanner] Requesting camera access...');
+        setCameraError(null);
+
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
+
+        console.log('[AIFoodScanner] Camera stream obtained:', stream);
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           streamRef.current = stream;
-          setCameraActive(true);
+
+          // Wait for video to load metadata
+          const onLoadedMetadata = () => {
+            console.log('[AIFoodScanner] Video metadata loaded');
+            setCameraActive(true);
+            videoRef.current?.removeEventListener('loadedmetadata', onLoadedMetadata);
+          };
+
+          videoRef.current.addEventListener('loadedmetadata', onLoadedMetadata);
+
+          // Try to play video
+          try {
+            await videoRef.current.play();
+            console.log('[AIFoodScanner] Video playback started');
+          } catch (playError) {
+            console.error('[AIFoodScanner] Play error:', playError);
+            setCameraError('Failed to start video playback');
+          }
         }
       } catch (error) {
-        console.error('Camera error:', error);
-        toast.error('Camera not available. Please check permissions.');
+        console.error('[AIFoodScanner] Camera initialization error:', error);
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : 'Camera not available. Please check permissions.';
+        setCameraError(errorMessage);
+        toast.error(`Camera error: ${errorMessage}`);
       }
     };
 
@@ -78,27 +112,46 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
 
     return () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current.getTracks().forEach((track) => {
+          console.log('[AIFoodScanner] Stopping track:', track.kind);
+          track.stop();
+        });
         setCameraActive(false);
       }
     };
-  }, [isOpen, stage, cameraActive]);
+  }, [isOpen, stage]);
 
   // Capture photo from camera
   const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return;
+    if (!videoRef.current || !canvasRef.current) {
+      toast.error('Camera not ready');
+      return;
+    }
 
-    const context = canvasRef.current.getContext('2d');
-    if (!context) return;
+    try {
+      const context = canvasRef.current.getContext('2d');
+      if (!context) {
+        toast.error('Failed to get canvas context');
+        return;
+      }
 
-    canvasRef.current.width = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
-    context.drawImage(videoRef.current, 0, 0);
+      canvasRef.current.width = videoRef.current.videoWidth;
+      canvasRef.current.height = videoRef.current.videoHeight;
 
-    const imageData = canvasRef.current.toDataURL('image/jpeg');
-    setPhotoData(imageData);
-    setStage('preview');
-    toast.success('Photo captured!');
+      if (canvasRef.current.width === 0 || canvasRef.current.height === 0) {
+        toast.error('Video not ready yet. Please wait a moment.');
+        return;
+      }
+
+      context.drawImage(videoRef.current, 0, 0);
+      const imageData = canvasRef.current.toDataURL('image/jpeg', 0.9);
+      setPhotoData(imageData);
+      setStage('preview');
+      toast.success('Photo captured!');
+    } catch (error) {
+      console.error('[AIFoodScanner] Capture error:', error);
+      toast.error('Failed to capture photo');
+    }
   };
 
   // Start voice recording
@@ -204,6 +257,7 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
     setStage('camera');
     setPhotoData(null);
     setCameraActive(false);
+    setCameraError(null);
     setIsRecording(false);
     setRecordedAudio(null);
     setTextDescription('');
@@ -217,98 +271,170 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
     setStage('camera');
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>AI Food Scanner</DialogTitle>
-        </DialogHeader>
+  // Show button when closed
+  if (!isOpen) {
+    return null;
+  }
 
-        {stage === 'camera' && (
-          <div className="space-y-4">
+  // Show camera stage
+  if (stage === 'camera') {
+    return (
+      <Card className="border-white/10 bg-white/[0.03] fixed inset-0 z-50 m-4 max-w-md mx-auto my-auto rounded-lg">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>AI Food Scanner</CardTitle>
+            <CardDescription>Take a photo of your food</CardDescription>
+          </div>
+          <button
+            onClick={handleClose}
+            className="text-white/60 hover:text-white transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          {cameraError ? (
+            <div className="bg-red-900/30 border border-red-500 rounded-lg p-4 text-red-200 text-sm">
+              <p className="font-semibold mb-2">Camera Error</p>
+              <p>{cameraError}</p>
+              <p className="text-xs mt-2">Please check that:</p>
+              <ul className="text-xs list-disc list-inside mt-1">
+                <li>Camera permissions are granted</li>
+                <li>No other app is using the camera</li>
+                <li>You're using a browser that supports camera access</li>
+              </ul>
+            </div>
+          ) : (
             <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
+                muted
                 className="w-full h-full object-cover"
               />
               <canvas ref={canvasRef} className="hidden" />
+              {!cameraActive && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                  <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin text-cyan-500 mx-auto mb-2" />
+                    <p className="text-white text-sm">Initializing camera...</p>
+                  </div>
+                </div>
+              )}
             </div>
+          )}
 
-            <div className="flex gap-2">
-              <Button
-                onClick={capturePhoto}
-                className="flex-1 bg-cyan-500 hover:bg-cyan-600"
-                disabled={!cameraActive}
-              >
-                <Camera className="h-4 w-4 mr-2" />
-                Take Photo
-              </Button>
-              <Button variant="outline" onClick={handleClose}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
+          <div className="flex gap-2">
+            <Button
+              onClick={capturePhoto}
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600"
+              disabled={!cameraActive || !!cameraError}
+            >
+              <Camera className="h-4 w-4 mr-2" />
+              Take Photo
+            </Button>
+            <Button variant="outline" onClick={handleClose} size="sm">
+              <X className="h-4 w-4" />
+            </Button>
           </div>
-        )}
+        </CardContent>
+      </Card>
+    );
+  }
 
-        {stage === 'preview' && photoData && (
-          <div className="space-y-4">
-            <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
-              <img src={photoData} alt="Captured food" className="w-full h-full object-cover" />
-            </div>
+  // Show preview stage
+  if (stage === 'preview' && photoData) {
+    return (
+      <Card className="border-white/10 bg-white/[0.03] fixed inset-0 z-50 m-4 max-w-md mx-auto my-auto rounded-lg">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>Photo Preview</CardTitle>
+            <CardDescription>Review your photo</CardDescription>
+          </div>
+          <button
+            onClick={handleClose}
+            className="text-white/60 hover:text-white transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </CardHeader>
 
+        <CardContent className="space-y-4">
+          <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+            <img src={photoData} alt="Captured food" className="w-full h-full object-cover" />
+          </div>
+
+          <div className="flex gap-2">
             <Button
               onClick={() => setStage('description')}
-              className="w-full bg-cyan-500 hover:bg-cyan-600"
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600"
             >
               <Check className="h-4 w-4 mr-2" />
               Analyze Food
             </Button>
-
-            <Button variant="outline" onClick={retakePhoto} className="w-full">
-              Retake Photo
+            <Button variant="outline" onClick={retakePhoto} size="sm">
+              <Camera className="h-4 w-4" />
             </Button>
           </div>
-        )}
+        </CardContent>
+      </Card>
+    );
+  }
 
-        {stage === 'description' && photoData && (
-          <div className="space-y-4">
-            <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
-              <img src={photoData} alt="Captured food" className="w-full h-full object-cover" />
-            </div>
+  // Show description stage
+  if (stage === 'description' && photoData) {
+    return (
+      <Card className="border-white/10 bg-white/[0.03] fixed inset-0 z-50 m-4 max-w-md mx-auto my-auto rounded-lg overflow-y-auto max-h-[90vh]">
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <div>
+            <CardTitle>Add Description</CardTitle>
+            <CardDescription>Help AI calculate macros accurately</CardDescription>
+          </div>
+          <button
+            onClick={handleClose}
+            className="text-white/60 hover:text-white transition-colors"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </CardHeader>
 
-            <div className="space-y-2">
-              <Label className="text-xs text-slate-400">
-                Optional: Describe the food to help AI calculate macros accurately
-              </Label>
+        <CardContent className="space-y-4">
+          <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+            <img src={photoData} alt="Captured food" className="w-full h-full object-cover" />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs text-slate-400">
+              Optional: Describe the food to help AI calculate macros accurately
+            </Label>
             <Textarea
-                placeholder="e.g., Grilled chicken breast with rice and broccoli"
-                value={textDescription}
-                onChange={(e) => setTextDescription(e.target.value)}
-                className="bg-white/10 border-white/20 text-sm min-h-20"
-              />
-            </div>
+              placeholder="e.g., Grilled chicken breast with rice and broccoli"
+              value={textDescription}
+              onChange={(e) => setTextDescription(e.target.value)}
+              className="bg-white/10 border-white/20 text-sm min-h-20"
+            />
+          </div>
 
-            <div className="space-y-2">
-              <Label className="text-xs text-slate-400">Or record a voice description</Label>
-              <Button
-                onClick={isRecording ? stopRecording : startRecording}
-                variant={isRecording ? 'destructive' : 'outline'}
-                className="w-full"
-              >
-                <Mic className="h-4 w-4 mr-2" />
-                {isRecording ? 'Stop Recording' : 'Record Voice'}
-              </Button>
-              {recordedAudio && (
-                <div className="text-xs text-green-400">✓ Voice recorded</div>
-              )}
-            </div>
+          <div className="space-y-2">
+            <Label className="text-xs text-slate-400">Or record a voice description</Label>
+            <Button
+              onClick={isRecording ? stopRecording : startRecording}
+              variant={isRecording ? 'destructive' : 'outline'}
+              className="w-full"
+            >
+              <Mic className="h-4 w-4 mr-2" />
+              {isRecording ? 'Stop Recording' : 'Record Voice'}
+            </Button>
+            {recordedAudio && <div className="text-xs text-green-400">✓ Voice recorded</div>}
+          </div>
 
+          <div className="flex gap-2">
             <Button
               onClick={analyzeFood}
               disabled={isAnalyzing}
-              className="w-full bg-cyan-500 hover:bg-cyan-600"
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600"
             >
               {isAnalyzing ? (
                 <>
@@ -318,17 +444,18 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
               ) : (
                 <>
                   <Check className="h-4 w-4 mr-2" />
-                  Analyze & Add Food
+                  Analyze & Add
                 </>
               )}
             </Button>
-
-            <Button variant="outline" onClick={retakePhoto} className="w-full">
-              Retake Photo
+            <Button variant="outline" onClick={retakePhoto} size="sm">
+              <Camera className="h-4 w-4" />
             </Button>
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return null;
 }
