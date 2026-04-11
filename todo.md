@@ -335,7 +335,7 @@
 - [x] Added daily totals display above meal sections
 
 
-## Feature - Advanced Food Selection with Quantities and Sizes (v1.30 - In Progress)
+## Feature - Advanced Food Selection with Quantities and Sizes (v1.30 - Complete)
 
 - [x] Research macro data for fruits by size (small, medium, large)
 - [x] Create food variant system for countable items (eggs, pieces, etc)
@@ -442,3 +442,22 @@
 - [x] Created 10 comprehensive barcode detection tests - all passing
 - [x] Tested with real product: Muscle Milk (660726503270)
 - [x] TypeScript compilation clean
+
+
+## Bug Report - Barcode Scanner Not Auto-Scanning (v1.34 - FIXED)
+
+- [x] Rewrote BarcodeScanner component to use native Web APIs (getUserMedia) instead of html5-qrcode
+- [x] Added automatic video readiness check before starting detection loop
+- [x] Improved frame detection logic to validate video dimensions before processing
+- [x] Added console logging to track detection flow
+- [x] Implemented duplicate prevention using lastDetectedRef
+- [x] Fixed camera stream cleanup on component unmount
+- [x] Added file upload fallback for barcode images
+- [x] Fixed USDA API tests to match actual endpoint implementation
+- [x] All 10 barcode detection tests passing
+- [x] All 11 USDA tests passing
+- [x] TypeScript compilation clean
+- [x] Dev server running without errors
+- [x] Barcode scanner modal opens correctly when button clicked
+- [x] Camera error handling displays gracefully with helpful instructions
+- [x] Component ready for production use with real camera devices

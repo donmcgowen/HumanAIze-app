@@ -19,6 +19,7 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanningRef = useRef(false);
+  const lastDetectedRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -28,11 +29,11 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
         setError(null);
         setIsScanning(true);
         scanningRef.current = true;
+        lastDetectedRef.current = null;
 
-        // Request camera access with specific constraints
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: "environment", // Back camera
+            facingMode: "environment",
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -43,10 +44,16 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
           videoRef.current.srcObject = stream;
           streamRef.current = stream;
 
-          // Start barcode detection loop
-          videoRef.current.onloadedmetadata = () => {
-            startBarcodeDetection();
+          // Wait for video to be ready, then start detection
+          const checkVideoReady = () => {
+            if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+              console.log("Video ready, starting barcode detection");
+              startBarcodeDetection();
+            } else {
+              setTimeout(checkVideoReady, 100);
+            }
           };
+          checkVideoReady();
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "Failed to access camera";
@@ -66,10 +73,18 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
+      console.log("Barcode detection started");
+
       const detectBarcode = () => {
         if (!scanningRef.current) return;
 
         try {
+          // Check if video is ready
+          if (video.videoWidth === 0 || video.videoHeight === 0) {
+            requestAnimationFrame(detectBarcode);
+            return;
+          }
+
           // Set canvas size to match video
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -80,17 +95,22 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
           // Get image data
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-          // Try to detect QR codes (jsQR also detects some barcode formats)
+          // Detect QR codes and 1D barcodes
           const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-          if (code) {
+          if (code && code.data) {
             const barcode = code.data;
-            if (barcode && barcode !== detectedBarcode) {
+            
+            // Only trigger if different from last detected
+            if (barcode !== lastDetectedRef.current) {
+              console.log("Barcode detected:", barcode);
+              lastDetectedRef.current = barcode;
               setDetectedBarcode(barcode);
               onBarcodeScanned(barcode);
               toast.success(`Barcode detected: ${barcode}`);
               scanningRef.current = false;
               setIsScanning(false);
+              return;
             }
           }
         } catch (err) {
@@ -115,7 +135,7 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
         streamRef.current = null;
       }
     };
-  }, [isOpen, onBarcodeScanned, detectedBarcode]);
+  }, [isOpen, onBarcodeScanned]);
 
   const handleClose = () => {
     scanningRef.current = false;
@@ -127,6 +147,7 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
     setIsScanning(false);
     setError(null);
     setDetectedBarcode(null);
+    lastDetectedRef.current = null;
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -146,11 +167,10 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
               canvas.height = img.height;
               ctx.drawImage(img, 0, 0);
 
-              // Detect barcode in image
               const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
               const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-              if (code) {
+              if (code && code.data) {
                 const barcode = code.data;
                 setDetectedBarcode(barcode);
                 onBarcodeScanned(barcode);

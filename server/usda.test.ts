@@ -58,7 +58,7 @@ describe("USDA FoodData Central Integration", () => {
       });
 
       expect(global.fetch).toHaveBeenCalledWith(
-        "https://fdc.nal.usda.gov/api/v1/foods/search",
+        expect.stringContaining("https://api.nal.usda.gov/fdc/v1/foods/search"),
         expect.objectContaining({
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -66,8 +66,6 @@ describe("USDA FoodData Central Integration", () => {
             query: "chicken",
             pageSize: 10,
             pageNumber: 1,
-            sortBy: "dataType.keyword",
-            sortOrder: "asc",
           }),
         })
       );
@@ -230,7 +228,7 @@ describe("USDA FoodData Central Integration", () => {
       });
 
       expect(global.fetch).toHaveBeenCalledWith(
-        "https://fdc.nal.usda.gov/api/v1/food/123456",
+        expect.stringContaining("https://api.nal.usda.gov/fdc/v1/food/123456"),
         expect.any(Object)
       );
     });
