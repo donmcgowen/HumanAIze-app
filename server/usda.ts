@@ -29,7 +29,7 @@ export async function searchUSDAFoods(query: string): Promise<USDAFoodResult[]> 
   }
 
   try {
-    const response = await fetch(`${USDA_API_BASE}/foods/search`, {
+    const response = await fetch(`${USDA_API_BASE}/foods/search?api_key=${USDA_API_KEY}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

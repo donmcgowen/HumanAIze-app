@@ -4,7 +4,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { FOOD_DATABASE, calculateMacros, searchFoods } from "@/../../shared/foodDatabase";
 import { toast } from "sonner";
 import { Plus, Trash2, Search, Edit2, Check, X, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
@@ -22,16 +21,21 @@ interface USDAFoodResult {
 
 export function FoodLogger() {
   // State declarations first
-  const [selectedFood, setSelectedFood] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState("");
-  const [quantityUnit, setQuantityUnit] = useState("grams");
   const [searchQuery, setSearchQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
+  const [selectedFood, setSelectedFood] = useState<USDAFoodResult | null>(null);
+  const [quantity, setQuantity] = useState("");
+  const [quantityUnit, setQuantityUnit] = useState("grams");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
-  const [useUSDASearch, setUseUSDASearch] = useState(false);
-  const [selectedUSDAFood, setSelectedUSDAFood] = useState<USDAFoodResult | null>(null);
+  const [useManualEntry, setUseManualEntry] = useState(false);
+  const [manualFoodName, setManualFoodName] = useState("");
+  const [manualCalories, setManualCalories] = useState("");
+  const [manualProtein, setManualProtein] = useState("");
+  const [manualCarbs, setManualCarbs] = useState("");
+  const [manualFat, setManualFat] = useState("");
 
+  // Queries
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
     startOfDay: new Date(new Date().setHours(0, 0, 0, 0)).getTime(),
     endOfDay: new Date(new Date().setHours(23, 59, 59, 999)).getTime(),
@@ -40,7 +44,7 @@ export function FoodLogger() {
   // USDA search query
   const { data: usdaResults, isLoading: isSearching } = trpc.food.searchUSDA.useQuery(
     { query: searchQuery },
-    { enabled: searchQuery.length > 2 && useUSDASearch }
+    { enabled: searchQuery.length > 2 && !useManualEntry }
   );
 
   // Mutations
@@ -51,19 +55,26 @@ export function FoodLogger() {
       setQuantity("");
       setQuantityUnit("grams");
       setSearchQuery("");
-      setUseUSDASearch(false);
+      setUseManualEntry(false);
+      setManualFoodName("");
+      setManualCalories("");
+      setManualProtein("");
+      setManualCarbs("");
+      setManualFat("");
       toast.success("Food logged successfully");
     },
     onError: () => {
       toast.error("Failed to log food");
     },
   });
+
   const deleteFoodLog = trpc.food.deleteLog.useMutation({
     onSuccess: () => {
       refetch();
       toast.success("Food removed");
     },
   });
+
   const updateFoodLog = trpc.food.updateLog.useMutation({
     onSuccess: () => {
       refetch();
@@ -104,17 +115,6 @@ export function FoodLogger() {
     setEditValues({});
   };
 
-  // Filter foods based on search (local database)
-  const filteredFoods = useMemo(() => {
-    if (!searchQuery || useUSDASearch) return [];
-    return searchFoods(searchQuery).slice(0, 15);
-  }, [searchQuery, useUSDASearch]);
-
-  // Get selected food details (local database)
-  const selectedFoodItem = selectedFood && !useUSDASearch
-    ? FOOD_DATABASE.find(f => f.id === selectedFood)
-    : null;
-
   // Convert quantity to grams
   const getQuantityInGrams = (): number => {
     const qty = parseFloat(quantity);
@@ -133,24 +133,30 @@ export function FoodLogger() {
     }
   };
 
-  // Calculate macros for selected food and quantity
+  // Calculate macros for USDA food
   const calculatedMacros = useMemo(() => {
-    if (useUSDASearch && selectedUSDAFood && quantity) {
-      const quantityInGrams = getQuantityInGrams();
-      const scale = quantityInGrams / selectedUSDAFood.servingSize;
+    if (useManualEntry) {
       return {
-        protein: selectedUSDAFood.protein * scale,
-        carbs: selectedUSDAFood.carbs * scale,
-        fat: selectedUSDAFood.fat * scale,
-        calories: selectedUSDAFood.calories * scale,
+        protein: parseFloat(manualProtein) || 0,
+        carbs: parseFloat(manualCarbs) || 0,
+        fat: parseFloat(manualFat) || 0,
+        calories: parseInt(manualCalories) || 0,
       };
     }
-    if (!selectedFoodItem || !quantity) {
-      return { protein: 0, carbs: 0, fat: 0, calories: 0 };
+
+    if (selectedFood && quantity) {
+      const quantityInGrams = getQuantityInGrams();
+      const scale = quantityInGrams / selectedFood.servingSize;
+      return {
+        protein: selectedFood.protein * scale,
+        carbs: selectedFood.carbs * scale,
+        fat: selectedFood.fat * scale,
+        calories: selectedFood.calories * scale,
+      };
     }
-    const quantityInGrams = getQuantityInGrams();
-    return calculateMacros(selectedFoodItem, quantityInGrams);
-  }, [selectedFoodItem, selectedUSDAFood, quantity, quantityUnit, useUSDASearch]);
+
+    return { protein: 0, carbs: 0, fat: 0, calories: 0 };
+  }, [selectedFood, quantity, quantityUnit, useManualEntry, manualProtein, manualCarbs, manualFat, manualCalories]);
 
   // Calculate daily totals
   const dailyTotals = useMemo(() => {
@@ -167,22 +173,28 @@ export function FoodLogger() {
   }, [foodLogs]);
 
   const handleAddFood = () => {
-    if (useUSDASearch) {
-      if (!selectedUSDAFood || !quantity) return;
+    if (useManualEntry) {
+      if (!manualFoodName || !manualCalories) {
+        toast.error("Please enter food name and calories");
+        return;
+      }
       addFoodLog.mutate({
-        foodName: selectedUSDAFood.description,
-        servingSize: `${quantity}${quantityUnit}`,
-        calories: Math.round(calculatedMacros.calories),
-        proteinGrams: Math.round(calculatedMacros.protein * 10) / 10,
-        carbsGrams: Math.round(calculatedMacros.carbs * 10) / 10,
-        fatGrams: Math.round(calculatedMacros.fat * 10) / 10,
+        foodName: manualFoodName,
+        servingSize: "custom",
+        calories: parseInt(manualCalories),
+        proteinGrams: parseFloat(manualProtein) || 0,
+        carbsGrams: parseFloat(manualCarbs) || 0,
+        fatGrams: parseFloat(manualFat) || 0,
         mealType: "other",
         loggedAt: Date.now(),
       });
     } else {
-      if (!selectedFoodItem || !quantity) return;
+      if (!selectedFood || !quantity) {
+        toast.error("Please select a food and enter quantity");
+        return;
+      }
       addFoodLog.mutate({
-        foodName: selectedFoodItem.name,
+        foodName: selectedFood.description,
         servingSize: `${quantity}${quantityUnit}`,
         calories: Math.round(calculatedMacros.calories),
         proteinGrams: Math.round(calculatedMacros.protein * 10) / 10,
@@ -200,143 +212,180 @@ export function FoodLogger() {
       <Card className="border-white/10 bg-white/[0.03]">
         <CardHeader>
           <CardTitle>Log Food</CardTitle>
-          <CardDescription>Search and add foods to track your macros</CardDescription>
+          <CardDescription>Search USDA database or manually enter food and macros</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Search Mode Toggle */}
+          {/* Entry Mode Toggle */}
           <div className="flex gap-2">
             <Button
-              variant={!useUSDASearch ? "default" : "outline"}
+              variant={!useManualEntry ? "default" : "outline"}
               size="sm"
               onClick={() => {
-                setUseUSDASearch(false);
-                setSelectedUSDAFood(null);
+                setUseManualEntry(false);
                 setSelectedFood(null);
+                setSearchQuery("");
               }}
-              className={!useUSDASearch ? "bg-cyan-500 hover:bg-cyan-600" : ""}
+              className={!useManualEntry ? "bg-cyan-500 hover:bg-cyan-600" : ""}
             >
-              Local Database
+              Search USDA Database
             </Button>
             <Button
-              variant={useUSDASearch ? "default" : "outline"}
+              variant={useManualEntry ? "default" : "outline"}
               size="sm"
               onClick={() => {
-                setUseUSDASearch(true);
+                setUseManualEntry(true);
                 setSelectedFood(null);
+                setSearchQuery("");
               }}
-              className={useUSDASearch ? "bg-cyan-500 hover:bg-cyan-600" : ""}
+              className={useManualEntry ? "bg-cyan-500 hover:bg-cyan-600" : ""}
             >
-              USDA FoodData Central
+              Manual Entry
             </Button>
           </div>
 
-          {/* Search Input */}
-          <div className="relative">
-            <Label className="text-xs text-slate-400 mb-2 block">
-              {useUSDASearch ? "Search USDA Database" : "Search Food"}
-            </Label>
-            <div className="relative">
-              <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
-              <Input
-                placeholder={useUSDASearch ? "e.g., chicken breast, brown rice..." : "e.g., chicken, rice, egg..."}
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setShowDropdown(true);
-                }}
-                onFocus={() => setShowDropdown(true)}
-                className="pl-9 bg-white/10 border-white/20"
-              />
-              {isSearching && useUSDASearch && (
-                <Loader2 className="absolute right-3 top-3 h-4 w-4 text-slate-400 animate-spin" />
-              )}
-            </div>
-
-            {/* Dropdown Results */}
-            {showDropdown && searchQuery && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-white/20 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
-                {useUSDASearch ? (
-                  usdaResults && usdaResults.length > 0 ? (
-                    usdaResults.map((food) => (
-                      <button
-                        key={food.fdcId}
-                        onClick={() => {
-                          setSelectedUSDAFood(food);
-                          setShowDropdown(false);
-                        }}
-                        className="w-full text-left px-3 py-2 hover:bg-white/10 transition text-sm text-slate-300 border-b border-white/5"
-                      >
-                        <div className="font-medium text-white">{food.description}</div>
-                        <div className="text-xs text-slate-500">
-                          {food.protein.toFixed(1)}g protein • {food.carbs.toFixed(1)}g carbs • {food.fat.toFixed(1)}g fat • {food.calories} cal per {food.servingSize}{food.servingUnit}
-                        </div>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-sm text-slate-400">
-                      {isSearching ? "Searching USDA database..." : "No results found"}
-                    </div>
-                  )
-                ) : (
-                  filteredFoods.length > 0 ? (
-                    filteredFoods.map((food) => (
-                      <button
-                        key={food.id}
-                        onClick={() => {
-                          setSelectedFood(food.id);
-                          setShowDropdown(false);
-                        }}
-                        className="w-full text-left px-3 py-2 hover:bg-white/10 transition text-sm text-slate-300 border-b border-white/5"
-                      >
-                        <div className="font-medium text-white">{food.name}</div>
-                        <div className="text-xs text-slate-500">
-                          {(food as any).protein}g protein • {(food as any).carbs}g carbs • {(food as any).fat}g fat • {(food as any).calories} cal per 100g
-                        </div>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="px-3 py-2 text-sm text-slate-400">No foods found</div>
-                  )
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Quantity Input */}
-          {(selectedFood || selectedUSDAFood) && (
-            <div className="grid grid-cols-3 gap-3">
+          {useManualEntry ? (
+            // Manual Entry Form
+            <div className="space-y-4">
               <div>
-                <Label className="text-xs text-slate-400 mb-2 block">Quantity</Label>
+                <Label className="text-xs text-slate-400 mb-2 block">Food Name</Label>
                 <Input
-                  type="number"
-                  placeholder="100"
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
+                  placeholder="e.g., Chicken Breast"
+                  value={manualFoodName}
+                  onChange={(e) => setManualFoodName(e.target.value)}
                   className="bg-white/10 border-white/20"
                 />
               </div>
-              <div>
-                <Label className="text-xs text-slate-400 mb-2 block">Unit</Label>
-                <Select value={quantityUnit} onValueChange={setQuantityUnit}>
-                  <SelectTrigger className="bg-white/10 border-white/20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="grams">g</SelectItem>
-                    <SelectItem value="oz">oz</SelectItem>
-                    <SelectItem value="lbs">lbs</SelectItem>
-                    <SelectItem value="cup">cup</SelectItem>
-                  </SelectContent>
-                </Select>
+
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <Label className="text-xs text-slate-400 mb-2 block">Calories</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={manualCalories}
+                    onChange={(e) => setManualCalories(e.target.value)}
+                    className="bg-white/10 border-white/20"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-400 mb-2 block">Protein (g)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={manualProtein}
+                    onChange={(e) => setManualProtein(e.target.value)}
+                    className="bg-white/10 border-white/20"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-400 mb-2 block">Carbs (g)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={manualCarbs}
+                    onChange={(e) => setManualCarbs(e.target.value)}
+                    className="bg-white/10 border-white/20"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-400 mb-2 block">Fat (g)</Label>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={manualFat}
+                    onChange={(e) => setManualFat(e.target.value)}
+                    className="bg-white/10 border-white/20"
+                  />
+                </div>
               </div>
+            </div>
+          ) : (
+            // USDA Search Form
+            <div className="space-y-4">
+              <div className="relative">
+                <Label className="text-xs text-slate-400 mb-2 block">Search Food</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
+                  <Input
+                    placeholder="e.g., chicken breast, brown rice..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setShowDropdown(true);
+                    }}
+                    onFocus={() => setShowDropdown(true)}
+                    className="pl-9 bg-white/10 border-white/20"
+                  />
+                  {isSearching && (
+                    <Loader2 className="absolute right-3 top-3 h-4 w-4 text-slate-400 animate-spin" />
+                  )}
+                </div>
+
+                {/* Dropdown Results */}
+                {showDropdown && searchQuery && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-white/20 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                    {usdaResults && usdaResults.length > 0 ? (
+                      usdaResults.map((food) => (
+                        <button
+                          key={food.fdcId}
+                          onClick={() => {
+                            setSelectedFood(food);
+                            setShowDropdown(false);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-white/10 transition text-sm text-slate-300 border-b border-white/5"
+                        >
+                          <div className="font-medium text-white">{food.description}</div>
+                          <div className="text-xs text-slate-500">
+                            {food.protein.toFixed(1)}g protein • {food.carbs.toFixed(1)}g carbs • {food.fat.toFixed(1)}g fat • {food.calories} cal per {food.servingSize}{food.servingUnit}
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-sm text-slate-400">
+                        {isSearching ? "Searching USDA database..." : "No results found"}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Quantity Input */}
+              {selectedFood && (
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <Label className="text-xs text-slate-400 mb-2 block">Quantity</Label>
+                    <Input
+                      type="number"
+                      placeholder="100"
+                      value={quantity}
+                      onChange={(e) => setQuantity(e.target.value)}
+                      className="bg-white/10 border-white/20"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-slate-400 mb-2 block">Unit</Label>
+                    <Select value={quantityUnit} onValueChange={setQuantityUnit}>
+                      <SelectTrigger className="bg-white/10 border-white/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="grams">g</SelectItem>
+                        <SelectItem value="oz">oz</SelectItem>
+                        <SelectItem value="lbs">lbs</SelectItem>
+                        <SelectItem value="cup">cup</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* Auto-calculated Macros Display */}
-          {((selectedFoodItem && quantity) || (selectedUSDAFood && quantity)) && (
+          {((selectedFood && quantity) || (useManualEntry && manualFoodName && manualCalories)) && (
             <div className="bg-cyan-300/10 border border-cyan-300/30 rounded p-4 space-y-3">
               <div className="text-sm font-semibold text-cyan-100">
-                {useUSDASearch ? selectedUSDAFood?.description : selectedFoodItem?.name} - {quantity} {quantityUnit}
+                {useManualEntry ? manualFoodName : selectedFood?.description}
               </div>
               <div className="grid grid-cols-4 gap-2 text-sm">
                 <div className="bg-white/5 p-2 rounded">
@@ -362,7 +411,7 @@ export function FoodLogger() {
           {/* Add Button */}
           <Button
             onClick={handleAddFood}
-            disabled={addFoodLog.isPending || (!selectedFood && !selectedUSDAFood) || !quantity}
+            disabled={addFoodLog.isPending || (useManualEntry ? !manualFoodName || !manualCalories : !selectedFood || !quantity)}
             className="w-full bg-cyan-500 hover:bg-cyan-600 text-white"
           >
             <Plus className="mr-2 h-4 w-4" />

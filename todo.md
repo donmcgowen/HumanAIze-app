@@ -303,3 +303,16 @@
 - [x] Add loading states and error handling for USDA API
 - [x] Create comprehensive unit tests for USDA integration (11 tests passing)
 - [x] Verify food search works with both local and USDA databases
+
+
+## Bug Report - USDA API Not Returning Results (v1.28 - Complete)
+
+- [x] Debug USDA API endpoint - found 403 error, API key was missing
+- [x] Check if USDA_API_KEY environment variable is set correctly
+- [x] Verify API endpoint URL and request format - fixed to include api_key query param
+- [x] Test USDA API directly with curl to confirm it's working
+- [x] Fix FoodLogger to only use USDA search (remove Local Database toggle)
+- [x] Add manual food entry option (user enters name + macros directly)
+- [x] Simplify UI to show only one input method at a time
+- [x] Test USDA search returns results for common foods
+- [x] Test manual entry fallback works correctly
