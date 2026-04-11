@@ -26,6 +26,7 @@ import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, delet
 import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
+import { generateFoodInsights, type DailyMacros } from "./insights";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
@@ -193,6 +194,55 @@ export const appRouter = router({
           ...product,
           variant: variant ? { type: variant.type } : null,
         };
+      }),
+    generateInsights: protectedProcedure
+      .input(
+        z.object({
+          foodLogs: z.array(
+            z.object({
+              foodName: z.string(),
+              calories: z.number(),
+              proteinGrams: z.number(),
+              carbsGrams: z.number(),
+              fatGrams: z.number(),
+              mealType: z.enum(["breakfast", "lunch", "dinner", "snack"]),
+            })
+          ),
+          dailyCalorieGoal: z.number().positive(),
+          dailyProteinGoal: z.number().positive(),
+          dailyCarbGoal: z.number().positive(),
+          dailyFatGoal: z.number().positive(),
+          healthObjectives: z.array(z.string()).optional(),
+        })
+      )
+      .query(async ({ input }) => {
+        const totalCalories = input.foodLogs.reduce((sum, log) => sum + log.calories, 0);
+        const totalProtein = input.foodLogs.reduce((sum, log) => sum + log.proteinGrams, 0);
+        const totalCarbs = input.foodLogs.reduce((sum, log) => sum + log.carbsGrams, 0);
+        const totalFat = input.foodLogs.reduce((sum, log) => sum + log.fatGrams, 0);
+
+        const macros: DailyMacros = {
+          totalCalories,
+          totalProtein,
+          totalCarbs,
+          totalFat,
+          caloriesRemaining: input.dailyCalorieGoal - totalCalories,
+          proteinRemaining: input.dailyProteinGoal - totalProtein,
+          carbsRemaining: input.dailyCarbGoal - totalCarbs,
+          fatRemaining: input.dailyFatGoal - totalFat,
+        };
+
+        return generateFoodInsights(
+          input.foodLogs,
+          {
+            dailyCalorieGoal: input.dailyCalorieGoal,
+            dailyProteinGoal: input.dailyProteinGoal,
+            dailyCarbGoal: input.dailyCarbGoal,
+            dailyFatGoal: input.dailyFatGoal,
+            healthObjectives: input.healthObjectives || [],
+          },
+          macros
+        );
       }),
   }),
   sync: router({
