@@ -30,9 +30,48 @@ import { generateFoodInsights, type DailyMacros } from "./insights";
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
 import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoAndVoice } from "./foodRecognition";
 import { storagePut } from "./storage";
+import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnalysis";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
+
+  ai: router({
+    analyzeMeal: protectedProcedure
+      .input(
+        z.object({
+          meals: z.array(
+            z.object({
+              foodName: z.string(),
+              calories: z.number().int().positive(),
+              protein: z.number().int().nonnegative(),
+              carbs: z.number().int().nonnegative(),
+              fat: z.number().int().nonnegative(),
+              quantity: z.number().optional(),
+              unit: z.string().optional(),
+            })
+          ),
+          dailyTargets: z.object({
+            dailyCalories: z.number().int().positive(),
+            dailyProtein: z.number().int().positive(),
+            dailyCarbs: z.number().int().positive(),
+            dailyFat: z.number().int().positive(),
+          }),
+          consumedSoFar: z.object({
+            calories: z.number().int().nonnegative(),
+            protein: z.number().int().nonnegative(),
+            carbs: z.number().int().nonnegative(),
+            fat: z.number().int().nonnegative(),
+          }),
+        })
+      )
+      .mutation(async ({ input }) => {
+        return analyzeMealWithAI(
+          input.meals,
+          input.dailyTargets,
+          input.consumedSoFar
+        );
+      }),
+  }),
 });
 
 export const appRouter = router({
@@ -394,3 +433,5 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+
+// Add AI meal analysis router (will be inserted before the closing brace)

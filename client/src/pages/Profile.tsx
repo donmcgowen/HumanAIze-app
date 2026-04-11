@@ -195,9 +195,18 @@ export function Profile() {
         fatMultiplier = 1.0;
       }
       
-      const dailyProtein = Math.round(weightKg * proteinMultiplier);
-      const dailyFat = Math.round(weightKg * fatMultiplier);
-      const dailyCarbs = Math.round((dailyCalories - dailyProtein * 4 - dailyFat * 9) / 4);
+      // Cap macros to ensure realistic values
+      // Protein: 25-35% of calories
+      const maxProteinCalories = Math.round(dailyCalories * 0.35);
+      let dailyProtein = Math.round(Math.min(weightKg * proteinMultiplier, maxProteinCalories / 4));
+      
+      // Fat: 20-35% of calories
+      const maxFatCalories = Math.round(dailyCalories * 0.35);
+      let dailyFat = Math.round(Math.min(weightKg * fatMultiplier, maxFatCalories / 9));
+      
+      // Carbs: fill remaining calories (ensure non-negative)
+      let dailyCarbs = Math.round((dailyCalories - dailyProtein * 4 - dailyFat * 9) / 4);
+      dailyCarbs = Math.max(dailyCarbs, 0);
       
       setDailyTargets({
         dailyCalories,
