@@ -6,14 +6,44 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FOOD_DATABASE, calculateMacros, searchFoods } from "@/../../shared/foodDatabase";
 import { toast } from "sonner";
-import { Plus, Trash2, Search, Edit2, Check, X } from "lucide-react";
+import { Plus, Trash2, Search, Edit2, Check, X, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
 
+interface USDAFoodResult {
+  fdcId: string;
+  description: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  servingSize: number;
+  servingUnit: string;
+}
+
 export function FoodLogger() {
+  // State declarations first
+  const [selectedFood, setSelectedFood] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState("");
+  const [quantityUnit, setQuantityUnit] = useState("grams");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<Record<number, any>>({});
+  const [useUSDASearch, setUseUSDASearch] = useState(false);
+  const [selectedUSDAFood, setSelectedUSDAFood] = useState<USDAFoodResult | null>(null);
+
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
     startOfDay: new Date(new Date().setHours(0, 0, 0, 0)).getTime(),
     endOfDay: new Date(new Date().setHours(23, 59, 59, 999)).getTime(),
   });
+
+  // USDA search query
+  const { data: usdaResults, isLoading: isSearching } = trpc.food.searchUSDA.useQuery(
+    { query: searchQuery },
+    { enabled: searchQuery.length > 2 && useUSDASearch }
+  );
+
+  // Mutations
   const addFoodLog = trpc.food.addLog.useMutation({
     onSuccess: () => {
       refetch();
@@ -21,6 +51,7 @@ export function FoodLogger() {
       setQuantity("");
       setQuantityUnit("grams");
       setSearchQuery("");
+      setUseUSDASearch(false);
       toast.success("Food logged successfully");
     },
     onError: () => {
@@ -45,14 +76,7 @@ export function FoodLogger() {
     },
   });
 
-  const [selectedFood, setSelectedFood] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState("");
-  const [quantityUnit, setQuantityUnit] = useState("grams");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editValues, setEditValues] = useState<Record<number, any>>({});
-
+  // Handlers
   const handleEditStart = (log: any) => {
     setEditingId(log.id);
     setEditValues({
@@ -80,14 +104,14 @@ export function FoodLogger() {
     setEditValues({});
   };
 
-  // Filter foods based on search
+  // Filter foods based on search (local database)
   const filteredFoods = useMemo(() => {
-    if (!searchQuery) return FOOD_DATABASE.slice(0, 15);
+    if (!searchQuery || useUSDASearch) return [];
     return searchFoods(searchQuery).slice(0, 15);
-  }, [searchQuery]);
+  }, [searchQuery, useUSDASearch]);
 
-  // Get selected food details
-  const selectedFoodItem = selectedFood
+  // Get selected food details (local database)
+  const selectedFoodItem = selectedFood && !useUSDASearch
     ? FOOD_DATABASE.find(f => f.id === selectedFood)
     : null;
 
@@ -98,11 +122,11 @@ export function FoodLogger() {
 
     switch (quantityUnit) {
       case "oz":
-        return qty * 28.35; // 1 oz = 28.35g
+        return qty * 28.35;
       case "lbs":
-        return qty * 453.6; // 1 lb = 453.6g
+        return qty * 453.6;
       case "cup":
-        return qty * 240; // 1 cup ≈ 240g (approximate)
+        return qty * 240;
       case "grams":
       default:
         return qty;
@@ -111,12 +135,22 @@ export function FoodLogger() {
 
   // Calculate macros for selected food and quantity
   const calculatedMacros = useMemo(() => {
+    if (useUSDASearch && selectedUSDAFood && quantity) {
+      const quantityInGrams = getQuantityInGrams();
+      const scale = quantityInGrams / selectedUSDAFood.servingSize;
+      return {
+        protein: selectedUSDAFood.protein * scale,
+        carbs: selectedUSDAFood.carbs * scale,
+        fat: selectedUSDAFood.fat * scale,
+        calories: selectedUSDAFood.calories * scale,
+      };
+    }
     if (!selectedFoodItem || !quantity) {
       return { protein: 0, carbs: 0, fat: 0, calories: 0 };
     }
     const quantityInGrams = getQuantityInGrams();
     return calculateMacros(selectedFoodItem, quantityInGrams);
-  }, [selectedFoodItem, quantity, quantityUnit]);
+  }, [selectedFoodItem, selectedUSDAFood, quantity, quantityUnit, useUSDASearch]);
 
   // Calculate daily totals
   const dailyTotals = useMemo(() => {
@@ -133,18 +167,31 @@ export function FoodLogger() {
   }, [foodLogs]);
 
   const handleAddFood = () => {
-    if (!selectedFoodItem || !quantity) return;
-
-    addFoodLog.mutate({
-      foodName: selectedFoodItem.name,
-      servingSize: `${quantity}${quantityUnit}`,
-      calories: Math.round(calculatedMacros.calories),
-      proteinGrams: Math.round(calculatedMacros.protein * 10) / 10,
-      carbsGrams: Math.round(calculatedMacros.carbs * 10) / 10,
-      fatGrams: Math.round(calculatedMacros.fat * 10) / 10,
-      mealType: "other",
-      loggedAt: Date.now(),
-    });
+    if (useUSDASearch) {
+      if (!selectedUSDAFood || !quantity) return;
+      addFoodLog.mutate({
+        foodName: selectedUSDAFood.description,
+        servingSize: `${quantity}${quantityUnit}`,
+        calories: Math.round(calculatedMacros.calories),
+        proteinGrams: Math.round(calculatedMacros.protein * 10) / 10,
+        carbsGrams: Math.round(calculatedMacros.carbs * 10) / 10,
+        fatGrams: Math.round(calculatedMacros.fat * 10) / 10,
+        mealType: "other",
+        loggedAt: Date.now(),
+      });
+    } else {
+      if (!selectedFoodItem || !quantity) return;
+      addFoodLog.mutate({
+        foodName: selectedFoodItem.name,
+        servingSize: `${quantity}${quantityUnit}`,
+        calories: Math.round(calculatedMacros.calories),
+        proteinGrams: Math.round(calculatedMacros.protein * 10) / 10,
+        carbsGrams: Math.round(calculatedMacros.carbs * 10) / 10,
+        fatGrams: Math.round(calculatedMacros.fat * 10) / 10,
+        mealType: "other",
+        loggedAt: Date.now(),
+      });
+    }
   };
 
   return (
@@ -156,13 +203,42 @@ export function FoodLogger() {
           <CardDescription>Search and add foods to track your macros</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Search Mode Toggle */}
+          <div className="flex gap-2">
+            <Button
+              variant={!useUSDASearch ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setUseUSDASearch(false);
+                setSelectedUSDAFood(null);
+                setSelectedFood(null);
+              }}
+              className={!useUSDASearch ? "bg-cyan-500 hover:bg-cyan-600" : ""}
+            >
+              Local Database
+            </Button>
+            <Button
+              variant={useUSDASearch ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setUseUSDASearch(true);
+                setSelectedFood(null);
+              }}
+              className={useUSDASearch ? "bg-cyan-500 hover:bg-cyan-600" : ""}
+            >
+              USDA FoodData Central
+            </Button>
+          </div>
+
           {/* Search Input */}
           <div className="relative">
-            <Label className="text-xs text-slate-400 mb-2 block">Search Food</Label>
+            <Label className="text-xs text-slate-400 mb-2 block">
+              {useUSDASearch ? "Search USDA Database" : "Search Food"}
+            </Label>
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" />
               <Input
-                placeholder="e.g., chicken, rice, egg..."
+                placeholder={useUSDASearch ? "e.g., chicken breast, brown rice..." : "e.g., chicken, rice, egg..."}
                 value={searchQuery}
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
@@ -171,32 +247,63 @@ export function FoodLogger() {
                 onFocus={() => setShowDropdown(true)}
                 className="pl-9 bg-white/10 border-white/20"
               />
+              {isSearching && useUSDASearch && (
+                <Loader2 className="absolute right-3 top-3 h-4 w-4 text-slate-400 animate-spin" />
+              )}
             </div>
 
             {/* Dropdown Results */}
-            {showDropdown && searchQuery && filteredFoods.length > 0 && (
+            {showDropdown && searchQuery && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-white/20 rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
-                {filteredFoods.map((food) => (
-                  <button
-                    key={food.id}
-                    onClick={() => {
-                      setSelectedFood(food.id);
-                      setShowDropdown(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-white/10 transition text-sm text-slate-300"
-                  >
-                    <div className="font-medium">{food.name}</div>
-                    <div className="text-xs text-slate-500">
-                      {(food as any).protein}g protein • {(food as any).carbs}g carbs • {(food as any).fat}g fat • {(food as any).calories} cal per 100g
+                {useUSDASearch ? (
+                  usdaResults && usdaResults.length > 0 ? (
+                    usdaResults.map((food) => (
+                      <button
+                        key={food.fdcId}
+                        onClick={() => {
+                          setSelectedUSDAFood(food);
+                          setShowDropdown(false);
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-white/10 transition text-sm text-slate-300 border-b border-white/5"
+                      >
+                        <div className="font-medium text-white">{food.description}</div>
+                        <div className="text-xs text-slate-500">
+                          {food.protein.toFixed(1)}g protein • {food.carbs.toFixed(1)}g carbs • {food.fat.toFixed(1)}g fat • {food.calories} cal per {food.servingSize}{food.servingUnit}
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-sm text-slate-400">
+                      {isSearching ? "Searching USDA database..." : "No results found"}
                     </div>
-                  </button>
-                ))}
+                  )
+                ) : (
+                  filteredFoods.length > 0 ? (
+                    filteredFoods.map((food) => (
+                      <button
+                        key={food.id}
+                        onClick={() => {
+                          setSelectedFood(food.id);
+                          setShowDropdown(false);
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-white/10 transition text-sm text-slate-300 border-b border-white/5"
+                      >
+                        <div className="font-medium text-white">{food.name}</div>
+                        <div className="text-xs text-slate-500">
+                          {(food as any).protein}g protein • {(food as any).carbs}g carbs • {(food as any).fat}g fat • {(food as any).calories} cal per 100g
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-sm text-slate-400">No foods found</div>
+                  )
+                )}
               </div>
             )}
           </div>
 
           {/* Quantity Input */}
-          {selectedFood && (
+          {(selectedFood || selectedUSDAFood) && (
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs text-slate-400 mb-2 block">Quantity</Label>
@@ -226,27 +333,27 @@ export function FoodLogger() {
           )}
 
           {/* Auto-calculated Macros Display */}
-          {selectedFoodItem && quantity && (
+          {((selectedFoodItem && quantity) || (selectedUSDAFood && quantity)) && (
             <div className="bg-cyan-300/10 border border-cyan-300/30 rounded p-4 space-y-3">
               <div className="text-sm font-semibold text-cyan-100">
-                {selectedFoodItem.name} - {quantity} {quantityUnit}
+                {useUSDASearch ? selectedUSDAFood?.description : selectedFoodItem?.name} - {quantity} {quantityUnit}
               </div>
               <div className="grid grid-cols-4 gap-2 text-sm">
                 <div className="bg-white/5 p-2 rounded">
                   <div className="text-xs text-slate-400">Protein</div>
-                  <div className="font-bold text-white">{calculatedMacros.protein}g</div>
+                  <div className="font-bold text-white">{calculatedMacros.protein.toFixed(1)}g</div>
                 </div>
                 <div className="bg-white/5 p-2 rounded">
                   <div className="text-xs text-slate-400">Carbs</div>
-                  <div className="font-bold text-white">{calculatedMacros.carbs}g</div>
+                  <div className="font-bold text-white">{calculatedMacros.carbs.toFixed(1)}g</div>
                 </div>
                 <div className="bg-white/5 p-2 rounded">
                   <div className="text-xs text-slate-400">Fat</div>
-                  <div className="font-bold text-white">{calculatedMacros.fat}g</div>
+                  <div className="font-bold text-white">{calculatedMacros.fat.toFixed(1)}g</div>
                 </div>
                 <div className="bg-white/5 p-2 rounded">
                   <div className="text-xs text-slate-400">Calories</div>
-                  <div className="font-bold text-white">{calculatedMacros.calories}</div>
+                  <div className="font-bold text-white">{calculatedMacros.calories.toFixed(0)}</div>
                 </div>
               </div>
             </div>
@@ -255,7 +362,7 @@ export function FoodLogger() {
           {/* Add Button */}
           <Button
             onClick={handleAddFood}
-            disabled={addFoodLog.isPending || !selectedFood || !quantity}
+            disabled={addFoodLog.isPending || (!selectedFood && !selectedUSDAFood) || !quantity}
             className="w-full bg-cyan-500 hover:bg-cyan-600 text-white"
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -299,159 +406,116 @@ export function FoodLogger() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {foodLogs.map((log: any) => {
-                const isEditing = editingId === log.id;
-                const values = editValues[log.id];
-                return (
-                  <div
-                    key={log.id}
-                    className="p-3 bg-white/5 rounded border border-white/10"
-                  >
-                    {isEditing ? (
-                      <div className="space-y-3">
+              {foodLogs.map((log: any) => (
+                <div key={log.id} className="flex items-center justify-between p-3 bg-white/5 rounded">
+                  {editingId === log.id ? (
+                    <div className="flex-1 space-y-2">
+                      <Input
+                        value={editValues[log.id]?.foodName || ""}
+                        onChange={(e) =>
+                          setEditValues({
+                            ...editValues,
+                            [log.id]: { ...editValues[log.id], foodName: e.target.value },
+                          })
+                        }
+                        className="bg-white/10 border-white/20 text-sm"
+                      />
+                      <div className="grid grid-cols-4 gap-2">
                         <Input
-                          value={values.foodName}
+                          type="number"
+                          placeholder="Calories"
+                          value={editValues[log.id]?.calories || ""}
                           onChange={(e) =>
                             setEditValues({
                               ...editValues,
-                              [log.id]: { ...values, foodName: e.target.value },
+                              [log.id]: { ...editValues[log.id], calories: parseInt(e.target.value) || 0 },
                             })
                           }
-                          placeholder="Food name"
-                          className="bg-white/10 border-white/20"
+                          className="bg-white/10 border-white/20 text-sm"
                         />
-                        <div className="grid grid-cols-4 gap-2">
-                          <div>
-                            <Label className="text-xs text-slate-400 mb-1 block">Protein (g)</Label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={values.proteinGrams}
-                              onChange={(e) =>
-                                setEditValues({
-                                  ...editValues,
-                                  [log.id]: {
-                                    ...values,
-                                    proteinGrams: parseFloat(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                              className="bg-white/10 border-white/20 text-xs"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs text-slate-400 mb-1 block">Carbs (g)</Label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={values.carbsGrams}
-                              onChange={(e) =>
-                                setEditValues({
-                                  ...editValues,
-                                  [log.id]: {
-                                    ...values,
-                                    carbsGrams: parseFloat(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                              className="bg-white/10 border-white/20 text-xs"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs text-slate-400 mb-1 block">Fat (g)</Label>
-                            <Input
-                              type="number"
-                              step="0.1"
-                              value={values.fatGrams}
-                              onChange={(e) =>
-                                setEditValues({
-                                  ...editValues,
-                                  [log.id]: {
-                                    ...values,
-                                    fatGrams: parseFloat(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                              className="bg-white/10 border-white/20 text-xs"
-                            />
-                          </div>
-                          <div>
-                            <Label className="text-xs text-slate-400 mb-1 block">Calories</Label>
-                            <Input
-                              type="number"
-                              value={values.calories}
-                              onChange={(e) =>
-                                setEditValues({
-                                  ...editValues,
-                                  [log.id]: {
-                                    ...values,
-                                    calories: parseInt(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                              className="bg-white/10 border-white/20 text-xs"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => handleEditSave(log.id)}
-                            disabled={updateFoodLog.isPending}
-                            className="flex-1 bg-cyan-500 hover:bg-cyan-600"
-                          >
-                            <Check className="h-4 w-4 mr-1" />
-                            Save
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={handleEditCancel}
-                            className="flex-1 border-white/20"
-                          >
-                            <X className="h-4 w-4 mr-1" />
-                            Cancel
-                          </Button>
+                        <Input
+                          type="number"
+                          placeholder="Protein"
+                          value={editValues[log.id]?.proteinGrams || ""}
+                          onChange={(e) =>
+                            setEditValues({
+                              ...editValues,
+                              [log.id]: { ...editValues[log.id], proteinGrams: parseFloat(e.target.value) || 0 },
+                            })
+                          }
+                          className="bg-white/10 border-white/20 text-sm"
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Carbs"
+                          value={editValues[log.id]?.carbsGrams || ""}
+                          onChange={(e) =>
+                            setEditValues({
+                              ...editValues,
+                              [log.id]: { ...editValues[log.id], carbsGrams: parseFloat(e.target.value) || 0 },
+                            })
+                          }
+                          className="bg-white/10 border-white/20 text-sm"
+                        />
+                        <Input
+                          type="number"
+                          placeholder="Fat"
+                          value={editValues[log.id]?.fatGrams || ""}
+                          onChange={(e) =>
+                            setEditValues({
+                              ...editValues,
+                              [log.id]: { ...editValues[log.id], fatGrams: parseFloat(e.target.value) || 0 },
+                            })
+                          }
+                          className="bg-white/10 border-white/20 text-sm"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleEditSave(log.id)}
+                          className="bg-green-600 hover:bg-green-700"
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" onClick={handleEditCancel} variant="outline">
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex-1">
+                        <div className="font-medium text-white">{log.foodName}</div>
+                        <div className="text-xs text-slate-500">
+                          {log.calories} cal • {log.proteinGrams}g protein • {log.carbsGrams}g carbs • {log.fatGrams}g fat
                         </div>
                       </div>
-                    ) : (
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="font-medium text-white">{log.foodName}</div>
-                          <div className="text-xs text-slate-400">
-                            P: {log.proteinGrams}g | C: {log.carbsGrams}g | F: {log.fatGrams}g | {log.calories} cal
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEditStart(log)}
-                            className="text-cyan-400 hover:bg-cyan-500/10"
-                          >
-                            <Edit2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteFoodLog.mutate({ foodLogId: log.id })}
-                            className="text-red-400 hover:bg-red-500/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleEditStart(log)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => deleteFoodLog.mutate({ foodLogId: log.id })}
+                          className="text-slate-400 hover:text-red-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {isLoading && (
-        <div className="text-center text-slate-400">Loading food logs...</div>
       )}
     </div>
   );

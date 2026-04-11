@@ -289,3 +289,17 @@
 - [x] Removed fake sync job records (recordCount: 21) from connectSource
 - [x] Deleted all demo data from database for user 1
 - [x] Dashboard now displays 0 values until real Dexcom data is synced
+
+
+## Feature - USDA FoodData Central Integration (v1.27 - Complete)
+
+- [x] Review current Food Logging implementation
+- [x] Add USDA FoodData Central API integration to backend tRPC
+- [x] Create food search endpoint that queries USDA database
+- [x] Update Food Logging UI to include food search input
+- [x] Display USDA search results with nutritional data
+- [x] Add toggle between local database and USDA search modes
+- [x] Implement food selection from USDA results with auto-populated macros
+- [x] Add loading states and error handling for USDA API
+- [x] Create comprehensive unit tests for USDA integration (11 tests passing)
+- [x] Verify food search works with both local and USDA databases

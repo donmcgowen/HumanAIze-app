@@ -13,6 +13,7 @@ export async function storeSourceCredentials(
   sourceId: number,
   credentials: Record<string, string>
 ) {
+  console.log(`[storeSourceCredentials] Starting for user ${userId}, source ${sourceId}`);
   const db = await getDb();
   if (!db) throw new Error("Database is not available.");
 
@@ -30,17 +31,19 @@ export async function storeSourceCredentials(
   const sourceRecord = source[0];
 
   // Validate credentials based on source type
+  console.log(`[storeSourceCredentials] Validating credentials for ${sourceRecord.displayName}`);
   validateCredentials(sourceRecord.displayName, credentials);
 
   // Test credentials against the provider's API
-  console.log(`Testing credentials for ${sourceRecord.displayName}...`);
+  console.log(`[storeSourceCredentials] Testing credentials for ${sourceRecord.displayName}...`);
   const isValid = await testSourceCredentials(sourceRecord.displayName, credentials);
   if (!isValid) {
+    console.error(`[storeSourceCredentials] Credential validation failed for ${sourceRecord.displayName}`);
     throw new Error(
       `Invalid credentials for ${sourceRecord.displayName}. Please verify your credentials and try again.`
     );
   }
-  console.log(`✓ Credentials validated for ${sourceRecord.displayName}`);
+  console.log(`[storeSourceCredentials] ✓ Credentials validated for ${sourceRecord.displayName}`);
 
   // Store credentials encrypted in metadata
   const existingMetadata = (sourceRecord.metadata as Record<string, any>) || {};
@@ -51,7 +54,9 @@ export async function storeSourceCredentials(
   let credentialsToStore: Record<string, any> = credentials;
   if (baseSourceKey === "dexcom") {
     try {
+      console.log(`[storeSourceCredentials] Authenticating with Dexcom API...`);
       const tokenData = await authenticateDexcom(credentials.username, credentials.password);
+      console.log(`[storeSourceCredentials] ✓ Dexcom authentication successful, received access token`);
       // Store tokens, not username/password
       credentialsToStore = {
         accessToken: tokenData.access_token,
@@ -60,6 +65,7 @@ export async function storeSourceCredentials(
         authType: "oauth_password_grant",
       };
     } catch (error) {
+      console.error(`[storeSourceCredentials] Dexcom authentication failed:`, error);
       throw new Error(`Failed to authenticate with Dexcom: ${error instanceof Error ? error.message : String(error)}`);
     }
   } else if (baseSourceKey === "custom-app" || baseSourceKey === "connect") {

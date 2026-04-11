@@ -23,6 +23,7 @@ import {
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
 import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, deleteFoodLog, updateFoodLog } from "./db";
+import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 
 const rangeInput = z.object({
@@ -170,6 +171,13 @@ export const appRouter = router({
         const { foodLogId, ...updates } = input;
         return updateFoodLog(foodLogId, ctx.user.id, updates);
       }),
+    searchUSDA: protectedProcedure
+      .input(
+        z.object({
+          query: z.string().min(1).max(100),
+        })
+      )
+      .query(({ input }) => searchUSDAFoods(input.query)),
   }),
   sync: router({
     status: protectedProcedure.query(() => getSyncStatus()),
