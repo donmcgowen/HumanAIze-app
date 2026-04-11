@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Plus, Trash2, Search, Edit2, Check, X, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { BarcodeScanner } from "./BarcodeScanner";
+import { FoodInsights } from "./FoodInsights";
 
 interface USDAFoodResult {
   fdcId: string;
@@ -57,6 +58,26 @@ export function FoodLogger() {
   const { data: usdaResults, isLoading: isSearching } = trpc.food.searchUSDA.useQuery(
     { query: searchQuery },
     { enabled: searchQuery.length > 2 && !useManualEntry }
+  );
+
+  // Insights query
+  const { data: insights, isLoading: insightsLoading } = trpc.food.generateInsights.useQuery(
+    {
+      foodLogs: (foodLogs || []).map(log => ({
+        foodName: log.foodName,
+        calories: log.calories,
+        proteinGrams: log.proteinGrams,
+        carbsGrams: log.carbsGrams,
+        fatGrams: log.fatGrams,
+        mealType: log.mealType as "breakfast" | "lunch" | "dinner" | "snack",
+      })),
+      dailyCalorieGoal: 2000,
+      dailyProteinGoal: 150,
+      dailyCarbGoal: 200,
+      dailyFatGoal: 65,
+      healthObjectives: ["balanced nutrition"],
+    },
+    { enabled: (foodLogs?.length || 0) > 0 }
   );
 
   // Mutations
@@ -691,6 +712,19 @@ export function FoodLogger() {
           </CardContent>
         </Card>
       )}
+      {/* Real-Time Insights */}
+      <FoodInsights
+        insights={insights || null}
+        isLoading={insightsLoading}
+        dailyCalorieGoal={2000}
+        currentCalories={dailyTotals.calories}
+        currentProtein={dailyTotals.protein}
+        dailyProteinGoal={150}
+        currentCarbs={dailyTotals.carbs}
+        dailyCarbGoal={200}
+        currentFat={dailyTotals.fat}
+        dailyFatGoal={65}
+      />
     </div>
   );
 }

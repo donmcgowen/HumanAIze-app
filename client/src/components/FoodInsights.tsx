@@ -11,7 +11,7 @@ interface InsightRecommendation {
 }
 
 interface FoodInsightsProps {
-  insights: InsightRecommendation[] | null;
+  insights: InsightRecommendation[] | null | undefined;
   isLoading: boolean;
   dailyCalorieGoal: number;
   currentCalories: number;

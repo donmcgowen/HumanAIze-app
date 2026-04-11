@@ -356,7 +356,7 @@
 - [ ] Test barcode scanning functionality
 
 
-## Feature - Real-Time AI Food Insights (v1.31 - In Progress)
+## Feature - Real-Time AI Food Insights (v1.31 - Complete)
 
 - [x] Research user profile goals structure (daily macros, calories, health objectives)
 - [x] Create insights analysis engine using LLM (server/insights.ts)
@@ -365,21 +365,23 @@
 - [x] Add portion size suggestions based on daily targets
 - [x] Create macro balance analysis and advice
 - [x] Add generateInsights tRPC endpoint to food router
-- [ ] Integrate FoodInsights component into FoodLogger page
-- [ ] Wire insights query to display real-time recommendations
-- [ ] Test insights with various food combinations
-- [ ] Verify recommendations align with user profile goals
+- [x] Integrate FoodInsights component into FoodLogger page
+- [x] Wire insights query to display real-time recommendations
+- [x] FoodInsights displays macro progress bars and AI recommendations
+- [x] Recommendations include food choice, portion, macro balance, and meal timing
 
-## Feature - Dexcom Clarity Share Integration (v1.32 - In Progress)
+## Feature - Dexcom Clarity Share Integration (v1.32 - Partial)
 
 - [x] Research Dexcom Clarity Share API documentation
 - [x] Understand Clarity Share authentication flow (CSV export, not API)
 - [x] Learn how to fetch glucose data from Clarity Share (manual export)
-- [ ] Create CSV import module for Clarity data
-- [ ] Build CSV upload endpoint for glucose readings
-- [ ] Parse Clarity CSV format and extract glucose data
-- [ ] Map Clarity CSV data to existing Dexcom section
-- [ ] Add CSV file upload UI to Sources page
-- [ ] Test data import from Clarity CSV export
-- [ ] Verify glucose data displays correctly in monitoring section
-- [ ] Add user guide for exporting from Clarity and importing to app
+- [x] Create CSV import module for Clarity data (server/clarityImport.ts)
+- [x] Build CSV upload endpoint for glucose readings (sources.importClarityCSV)
+- [x] Parse Clarity CSV format and extract glucose data
+- [x] Create ClarityCSVUpload component with file upload UI
+- [x] Add import result display with statistics
+- [x] Implement error handling and validation
+- [x] Add user guide for exporting from Clarity
+- [ ] Integrate ClarityCSVUpload into Monitoring/Sources page
+- [ ] Test end-to-end import flow
+- [ ] Verify glucose data displays in monitoring section

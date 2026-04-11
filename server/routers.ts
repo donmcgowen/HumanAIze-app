@@ -27,6 +27,7 @@ import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
 import { generateFoodInsights, type DailyMacros } from "./insights";
+import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
@@ -88,6 +89,28 @@ export const appRouter = router({
       .mutation(({ ctx, input }) =>
         createCustomSource(ctx.user.id, input.appName, input.category)
       ),
+    importClarityCSV: protectedProcedure
+      .input(
+        z.object({
+          csvContent: z.string().min(1),
+        })
+      )
+      .mutation(({ input }) => {
+        const validation = validateClarityCSV(input.csvContent);
+        if (!validation.valid) {
+          throw new Error(validation.error || "Invalid CSV format");
+        }
+        const result = parseClarityCSV(input.csvContent);
+        const stats = calculateReadingStats(result.readings);
+        return {
+          success: true,
+          importedCount: result.importedCount,
+          skippedCount: result.skippedCount,
+          errors: result.errors,
+          readings: result.readings,
+          statistics: stats,
+        };
+      }),
 
   }),
   assistant: router({
