@@ -24,6 +24,9 @@ export function Profile() {
   const [bmiCategory, setBmiCategory] = useState<string>("");
   const [weightUnit, setWeightUnit] = useState<"kg" | "lbs">("kg");
   const [heightUnit, setHeightUnit] = useState<"cm" | "in">("cm");
+  const [goalWeightKg, setGoalWeightKg] = useState<string>("");
+  const [goalDate, setGoalDate] = useState<string>("");
+  const [dailyTargets, setDailyTargets] = useState<any>(null);
 
   // Unit conversion helpers
   const convertWeight = (kg: number, toUnit: "kg" | "lbs") => {
@@ -162,6 +165,49 @@ export function Profile() {
     return labels[goal] || goal;
   };
 
+  // Calculate daily targets when profile data changes
+  useEffect(() => {
+    if (formData.heightCm && formData.weightKg && formData.ageYears && formData.fitnessGoal) {
+      const heightCm = parseFloat(formData.heightCm);
+      const weightKg = parseFloat(formData.weightKg);
+      const ageYears = parseInt(formData.ageYears);
+      
+      // Calculate TDEE using Mifflin-St Jeor formula
+      const bmr = 10 * weightKg + 6.25 * heightCm - 5 * ageYears + 5;
+      const tdee = Math.round(bmr * 1.55);
+      
+      // Calculate macros based on goal
+      let dailyCalories: number;
+      let proteinMultiplier: number;
+      let fatMultiplier: number;
+      
+      if (formData.fitnessGoal === "lose_fat") {
+        dailyCalories = Math.round(tdee * 0.8);
+        proteinMultiplier = 2.0;
+        fatMultiplier = 0.9;
+      } else if (formData.fitnessGoal === "build_muscle") {
+        dailyCalories = Math.round(tdee * 1.1);
+        proteinMultiplier = 2.0;
+        fatMultiplier = 1.1;
+      } else {
+        dailyCalories = tdee;
+        proteinMultiplier = 1.7;
+        fatMultiplier = 1.0;
+      }
+      
+      const dailyProtein = Math.round(weightKg * proteinMultiplier);
+      const dailyFat = Math.round(weightKg * fatMultiplier);
+      const dailyCarbs = Math.round((dailyCalories - dailyProtein * 4 - dailyFat * 9) / 4);
+      
+      setDailyTargets({
+        dailyCalories,
+        dailyProtein,
+        dailyCarbs,
+        dailyFat,
+      });
+    }
+  }, [formData.heightCm, formData.weightKg, formData.ageYears, formData.fitnessGoal]);
+
   if (isLoadingProfile) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -292,7 +338,7 @@ export function Profile() {
               <CardTitle className="text-white">Fitness Goal</CardTitle>
               <CardDescription>Select your primary fitness objective</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <Select value={formData.fitnessGoal} onValueChange={handleGoalChange}>
                 <SelectTrigger className="bg-slate-900 border-white/10 text-white">
                   <SelectValue placeholder="Select your fitness goal" />
@@ -311,26 +357,82 @@ export function Profile() {
               </Select>
 
               {formData.fitnessGoal && (
-                <div className="mt-4 p-3 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-300 text-sm">
-                    <span className="font-semibold">Goal:</span> {getGoalLabel(formData.fitnessGoal)}
-                  </p>
-                  {formData.fitnessGoal === "lose_fat" && (
-                    <p className="text-slate-400 text-xs mt-2">
-                      Focus on caloric deficit, regular cardio, and strength training to preserve muscle mass.
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="goalWeight" className="text-slate-300">
+                        Goal Weight ({weightUnit})
+                      </Label>
+                      <Input
+                        id="goalWeight"
+                        type="number"
+                        placeholder={weightUnit === "kg" ? "70" : "154"}
+                        value={goalWeightKg}
+                        onChange={(e) => setGoalWeightKg(e.target.value)}
+                        className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="goalDate" className="text-slate-300">
+                        Target Date
+                      </Label>
+                      <Input
+                        id="goalDate"
+                        type="date"
+                        value={goalDate}
+                        onChange={(e) => setGoalDate(e.target.value)}
+                        className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
+                    <p className="text-slate-300 text-sm font-semibold mb-3">
+                      <span>Daily Targets for {getGoalLabel(formData.fitnessGoal)}</span>
                     </p>
-                  )}
-                  {formData.fitnessGoal === "build_muscle" && (
-                    <p className="text-slate-400 text-xs mt-2">
-                      Prioritize strength training, adequate protein intake, and caloric surplus for muscle growth.
+                    {dailyTargets && (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-slate-800 p-3 rounded">
+                          <p className="text-slate-400 text-xs">Calories</p>
+                          <p className="text-cyan-400 text-lg font-bold">{dailyTargets.dailyCalories}</p>
+                        </div>
+                        <div className="bg-slate-800 p-3 rounded">
+                          <p className="text-slate-400 text-xs">Protein</p>
+                          <p className="text-cyan-400 text-lg font-bold">{dailyTargets.dailyProtein}g</p>
+                        </div>
+                        <div className="bg-slate-800 p-3 rounded">
+                          <p className="text-slate-400 text-xs">Carbs</p>
+                          <p className="text-cyan-400 text-lg font-bold">{dailyTargets.dailyCarbs}g</p>
+                        </div>
+                        <div className="bg-slate-800 p-3 rounded">
+                          <p className="text-slate-400 text-xs">Fat</p>
+                          <p className="text-cyan-400 text-lg font-bold">{dailyTargets.dailyFat}g</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-slate-900 border border-white/10">
+                    <p className="text-slate-300 text-sm">
+                      <span className="font-semibold">Goal:</span> {getGoalLabel(formData.fitnessGoal)}
                     </p>
-                  )}
-                  {formData.fitnessGoal === "maintain" && (
-                    <p className="text-slate-400 text-xs mt-2">
-                      Balance your nutrition and exercise to maintain current fitness levels.
-                    </p>
-                  )}
-                </div>
+                    {formData.fitnessGoal === "lose_fat" && (
+                      <p className="text-slate-400 text-xs mt-2">
+                        Focus on caloric deficit, regular cardio, and strength training to preserve muscle mass.
+                      </p>
+                    )}
+                    {formData.fitnessGoal === "build_muscle" && (
+                      <p className="text-slate-400 text-xs mt-2">
+                        Prioritize strength training, adequate protein intake, and caloric surplus for muscle growth.
+                      </p>
+                    )}
+                    {formData.fitnessGoal === "maintain" && (
+                      <p className="text-slate-400 text-xs mt-2">
+                        Balance your nutrition and exercise to maintain current fitness levels.
+                      </p>
+                    )}
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
