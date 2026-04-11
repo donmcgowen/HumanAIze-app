@@ -345,7 +345,9 @@
 - [x] Integrate barcode scanning with Open Food Facts API
 - [x] Add lookupBarcode endpoint to food router
 - [x] Install html5-qrcode library for barcode scanning
-- [ ] Update FoodLogger component to use BarcodeScanner
+- [x] Update FoodLogger component to use BarcodeScanner
+- [x] Add barcode handler to populate food data
+- [x] Integrate barcode lookup with Open Food Facts API
 - [ ] Add quantity selector UI for countable foods
 - [ ] Add size selector UI for fruits
 - [ ] Integrate variant detection into FoodLogger

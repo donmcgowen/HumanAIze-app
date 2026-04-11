@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Plus, Trash2, Search, Edit2, Check, X, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
+import { BarcodeScanner } from "./BarcodeScanner";
 
 interface USDAFoodResult {
   fdcId: string;
@@ -44,6 +45,7 @@ export function FoodLogger() {
   const [manualProtein, setManualProtein] = useState("");
   const [manualCarbs, setManualCarbs] = useState("");
   const [manualFat, setManualFat] = useState("");
+  const [barcodeLoading, setBarcodeLoading] = useState(false);
 
   // Queries
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
@@ -125,6 +127,35 @@ export function FoodLogger() {
   const handleEditCancel = () => {
     setEditingId(null);
     setEditValues({});
+  };
+
+  const handleBarcodeScanned = async (barcode: string) => {
+    setBarcodeLoading(true);
+    try {
+      const product = await trpc.useUtils().food.lookupBarcode.fetch({ barcode });
+      if (product) {
+        setSelectedFood({
+          fdcId: barcode,
+          description: product.name,
+          calories: product.calories,
+          protein: product.protein,
+          carbs: product.carbs,
+          fat: product.fat,
+          servingSize: parseInt(product.servingSize),
+          servingUnit: product.servingUnit,
+        });
+        setQuantity(product.servingSize);
+        setQuantityUnit(product.servingUnit);
+        setUseManualEntry(false);
+        toast.success(`Found: ${product.name}`);
+      } else {
+        toast.error("Product not found in database");
+      }
+    } catch (err) {
+      toast.error("Failed to lookup barcode");
+    } finally {
+      setBarcodeLoading(false);
+    }
   };
 
   // Convert quantity to grams
@@ -400,7 +431,7 @@ export function FoodLogger() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Entry Mode Toggle */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Button
               variant={!useManualEntry ? "default" : "outline"}
               size="sm"
@@ -425,6 +456,7 @@ export function FoodLogger() {
             >
               Manual Entry
             </Button>
+            <BarcodeScanner onBarcodeScanned={handleBarcodeScanned} isLoading={barcodeLoading} />
           </div>
 
           {/* Meal Type Selection */}
