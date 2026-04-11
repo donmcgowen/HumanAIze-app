@@ -188,6 +188,12 @@ export const userProfiles = mysqlTable("user_profiles", {
   weightKg: double("weightKg"),
   ageYears: int("ageYears"),
   fitnessGoal: mysqlEnum("fitnessGoal", ["lose_fat", "build_muscle", "maintain"]),
+  goalWeightKg: double("goalWeightKg"),
+  goalDate: bigint("goalDate", { mode: "number" }),
+  dailyCalorieTarget: int("dailyCalorieTarget"),
+  dailyProteinTarget: int("dailyProteinTarget"),
+  dailyCarbsTarget: int("dailyCarbsTarget"),
+  dailyFatTarget: int("dailyFatTarget"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

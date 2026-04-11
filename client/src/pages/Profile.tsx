@@ -60,12 +60,27 @@ export function Profile() {
 
   // Calculate BMI whenever height or weight changes
   useEffect(() => {
-    const height = parseFloat(formData.heightCm);
-    const weight = parseFloat(formData.weightKg);
+    const heightInput = parseFloat(formData.heightCm);
+    const weightInput = parseFloat(formData.weightKg);
 
-    if (height > 0 && weight > 0) {
-      const heightM = height / 100;
-      const calculatedBmi = weight / (heightM * heightM);
+    if (heightInput > 0 && weightInput > 0) {
+      let calculatedBmi: number;
+      
+      if (heightUnit === "in" && weightUnit === "lbs") {
+        // Imperial formula: BMI = (weight_lbs / (height_inches²)) × 703
+        calculatedBmi = (weightInput / (heightInput * heightInput)) * 703;
+      } else if (heightUnit === "cm" && weightUnit === "kg") {
+        // Metric formula: BMI = weight_kg / (height_m²)
+        const heightM = heightInput / 100;
+        calculatedBmi = weightInput / (heightM * heightM);
+      } else {
+        // Mixed units - convert to metric first
+        let heightCm = heightUnit === "in" ? heightInput * 2.54 : heightInput;
+        let weightKg = weightUnit === "lbs" ? weightInput / 2.20462 : weightInput;
+        const heightM = heightCm / 100;
+        calculatedBmi = weightKg / (heightM * heightM);
+      }
+      
       setBmi(Math.round(calculatedBmi * 10) / 10);
 
       // Determine BMI category
@@ -82,7 +97,7 @@ export function Profile() {
       setBmi(null);
       setBmiCategory("");
     }
-  }, [formData.heightCm, formData.weightKg]);
+  }, [formData.heightCm, formData.weightKg, heightUnit, weightUnit]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -172,29 +187,14 @@ export function Profile() {
                   <CardTitle className="text-white">Biometric Data</CardTitle>
                   <CardDescription>Enter your height, weight, and age for BMI calculation</CardDescription>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setWeightUnit(weightUnit === "kg" ? "lbs" : "kg")}
-                    className="px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-400/30"
-                  >
-                    {weightUnit === "kg" ? "Switch to lbs" : "Switch to kg"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHeightUnit(heightUnit === "cm" ? "in" : "cm")}
-                    className="px-3 py-1 text-xs font-semibold rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-cyan-400/30"
-                  >
-                    {heightUnit === "cm" ? "Switch to in" : "Switch to cm"}
-                  </button>
-                </div>
+
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <Label htmlFor="heightCm" className="text-slate-300">
-                    Height ({heightUnit})
+                    Height
                   </Label>
                   <div className="flex gap-2 mt-2">
                     <Input
@@ -206,6 +206,15 @@ export function Profile() {
                       onChange={handleInputChange}
                       className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
                     />
+                    <Select value={heightUnit} onValueChange={(value) => setHeightUnit(value as "cm" | "in")}>
+                      <SelectTrigger className="w-20 bg-slate-900 border-white/10 text-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cm">cm</SelectItem>
+                        <SelectItem value="in">in</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <div className="flex items-center px-3 py-2 rounded-md bg-slate-900 border border-white/10 text-slate-400 text-sm">
                       {displayHeight()} {heightUnit}
                     </div>
@@ -213,7 +222,7 @@ export function Profile() {
                 </div>
                 <div>
                   <Label htmlFor="weightKg" className="text-slate-300">
-                    Weight ({weightUnit})
+                    Weight
                   </Label>
                   <div className="flex gap-2 mt-2">
                     <Input
@@ -225,6 +234,15 @@ export function Profile() {
                       onChange={handleInputChange}
                       className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
                     />
+                    <Select value={weightUnit} onValueChange={(value) => setWeightUnit(value as "kg" | "lbs")}>
+                      <SelectTrigger className="w-20 bg-slate-900 border-white/10 text-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="kg">kg</SelectItem>
+                        <SelectItem value="lbs">lbs</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <div className="flex items-center px-3 py-2 rounded-md bg-slate-900 border border-white/10 text-slate-400 text-sm">
                       {displayWeight()} {weightUnit}
                     </div>

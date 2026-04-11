@@ -527,3 +527,29 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Calculate macros based on actual serving size and quantity (existing logic)
 - [x] Test with protein powder (scoops), standard products (grams), etc.
 - [x] Verify macro calculations are accurate (7/7 barcode tests passing)
+
+
+## Bug Report - BMI Calculation Incorrect for Imperial Units (v1.40 - COMPLETE)
+
+- [x] Find Profile/Biometric component
+- [x] Replace "Switch to kg/cm" buttons with unit dropdowns
+- [x] Fix BMI formula for imperial units (lbs/inches): BMI = (weight_lbs / (height_inches²)) × 703
+- [x] Fix BMI formula for metric units (kg/cm): BMI = weight_kg / (height_m²)
+- [x] Test BMI calculation: 200 lbs, 72 inches = 27.1 BMI ✓ (was 385.8)
+- [x] Verify unit conversions work correctly
+- [x] Verified with 185.42cm, 85kg = 24.7 BMI (Normal weight)
+
+
+## Feature - Fitness Goal Calorie & Macro Targets (v1.41)
+
+- [ ] Update Profile schema to add goalWeight, goalDate, dailyCalorieTarget, dailyProteinTarget, dailyCarbs Target, dailyFatTarget
+- [ ] Create TDEE (Total Daily Energy Expenditure) calculation function using Mifflin-St Jeor formula
+- [ ] Create macro calculation function based on goal type (lose_fat, build_muscle, maintain)
+- [ ] Add goal weight input to Profile UI
+- [ ] Add goal date input to Profile UI (date picker)
+- [ ] Display calculated daily calorie target
+- [ ] Display calculated daily macro targets (protein, carbs, fat)
+- [ ] Show progress towards goal (current weight vs goal weight)
+- [ ] Calculate weekly weight loss/gain needed to reach goal by target date
+- [ ] Test calculations with different profile data
+- [ ] Verify macros align with fitness goals (high protein for muscle, calorie deficit for fat loss)
