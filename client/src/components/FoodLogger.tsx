@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { Plus, Trash2, Search, Edit2, Check, X, Loader2 } from "lucide-react";
 import { useState, useMemo } from "react";
 import { BarcodeScanner } from "./BarcodeScanner";
+import { QuantitySelector } from "./QuantitySelector";
+import { SizeSelector } from "./SizeSelector";
 import { FoodInsights } from "./FoodInsights";
 
 interface USDAFoodResult {
@@ -47,6 +49,9 @@ export function FoodLogger() {
   const [manualCarbs, setManualCarbs] = useState("");
   const [manualFat, setManualFat] = useState("");
   const [barcodeLoading, setBarcodeLoading] = useState(false);
+  // Variant detection state
+  const [showVariantSelector, setShowVariantSelector] = useState(false);
+  const [variantType, setVariantType] = useState<"quantity" | "size" | null>(null);
 
   // Queries
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
