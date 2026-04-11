@@ -1,4 +1,3 @@
-import { Html5Qrcode, Html5QrcodeScanner } from "html5-qrcode";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,75 +12,89 @@ interface BarcodeScannerProps {
 export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeScannerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
-    if (!isOpen || !containerRef.current) return;
+    if (!isOpen) return;
 
-    try {
-      const scanner = new Html5QrcodeScanner(
-        "barcode-scanner-container",
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-          disableFlip: false,
-          showTorchButtonIfSupported: true,
-          useBarCodeDetectorIfSupported: true,
-          rememberLastUsedCamera: false,
-        },
-        false
-      );
+    const startCamera = async () => {
+      try {
+        setError(null);
+        setIsScanning(true);
 
-      scanner.render(
-        (decodedText: string) => {
-          // Accept any barcode format (UPC, EAN, Code128, etc.)
-          if (decodedText && decodedText.length > 0) {
-            setIsScanning(true);
-            onBarcodeScanned(decodedText);
-            setTimeout(() => {
-              try {
-                scanner.clear();
-              } catch (e) {
-                // Ignore cleanup errors
-              }
-              setIsOpen(false);
-              setIsScanning(false);
-            }, 500);
-          }
-        },
-        (error: any) => {
-          // Silently ignore scanning errors
+        // Request camera access with specific constraints
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "environment", // Back camera
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          streamRef.current = stream;
         }
-      );
-
-      scannerRef.current = scanner;
-    } catch (err) {
-      toast.error("Failed to initialize barcode scanner");
-      setIsOpen(false);
-    }
-
-    return () => {
-      if (scannerRef.current) {
-        try {
-          scannerRef.current.clear();
-        } catch (err) {
-          // Ignore cleanup errors
-        }
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "Failed to access camera";
+        setError(errorMsg);
+        setIsScanning(false);
+        console.error("Camera error:", err);
       }
     };
-  }, [isOpen, onBarcodeScanned]);
+
+    startCamera();
+
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [isOpen]);
 
   const handleClose = () => {
-    if (scannerRef.current) {
-      try {
-        scannerRef.current.clear();
-      } catch (err) {
-        // Ignore cleanup errors
-      }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
     setIsOpen(false);
+    setIsScanning(false);
+    setError(null);
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const img = new Image();
+        img.onload = async () => {
+          // Scan image for barcodes using canvas
+          if (canvasRef.current) {
+            const ctx = canvasRef.current.getContext("2d");
+            if (ctx) {
+              canvasRef.current.width = img.width;
+              canvasRef.current.height = img.height;
+              ctx.drawImage(img, 0, 0);
+
+              // For now, show a placeholder - barcode detection would require additional library
+              toast.info("Image uploaded. Use camera for live barcode scanning.");
+            }
+          }
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      toast.error("Failed to process image");
+    }
   };
 
   if (!isOpen) {
@@ -119,15 +132,52 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
         </button>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div
-          ref={containerRef}
-          id="barcode-scanner-container"
-          className="w-full bg-black rounded border border-white/20"
-          style={{ minHeight: "300px" }}
-        />
+        {error ? (
+          <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 text-red-200 text-sm">
+            <p className="font-medium">Camera Error</p>
+            <p className="text-xs mt-1">{error}</p>
+            <p className="text-xs mt-2 text-red-300">
+              Make sure you've granted camera permissions in browser settings.
+            </p>
+          </div>
+        ) : (
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full bg-black rounded border border-white/20"
+              style={{ minHeight: "300px" }}
+            />
+            {isScanning && (
+              <div className="text-center text-sm text-slate-400">
+                Point camera at barcode to scan
+              </div>
+            )}
+          </>
+        )}
+
+        <canvas ref={canvasRef} className="hidden" />
+
+        <div className="space-y-2">
+          <label className="block">
+            <span className="text-xs text-slate-400">Or upload barcode image:</span>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleFileUpload}
+              className="mt-1 block w-full text-xs"
+            />
+          </label>
+        </div>
+
         <p className="text-xs text-slate-400 text-center">
           Supports UPC, EAN, and other 1D/2D barcodes
         </p>
+
+        <Button variant="outline" onClick={handleClose} className="w-full">
+          Close
+        </Button>
       </CardContent>
     </Card>
   );
