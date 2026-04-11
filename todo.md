@@ -486,3 +486,15 @@
 - [x] Test voice description with/without photo
 - [x] Test favorite foods backend functionality
 - [x] Test meal templates backend functionality
+
+
+## Bug Report - AI Food Scanner UX Redesign (v1.36) - COMPLETE
+
+- [x] Redesign AIFoodScanner to work like barcode scanner (single button opens camera)
+- [x] Remove mode selection buttons (camera-only, voice-only, camera+voice)
+- [x] Implement simple camera capture flow with photo preview
+- [x] Add post-capture voice/text description input
+- [x] Update Gemini analysis to use description for macro refinement
+- [x] Test camera opens and captures photo correctly
+- [x] Test voice/text description input after photo capture
+- [x] Test Gemini ready to use description for macro refinement

@@ -272,21 +272,21 @@ export const appRouter = router({
     recognizeWithAI: protectedProcedure
       .input(
         z.object({
-          mode: z.enum(["photo", "voice", "photo+voice"]),
           photoUrl: z.string().url().optional(),
           audioUrl: z.string().url().optional(),
+          textDescription: z.string().optional(),
         })
       )
       .mutation(async ({ input }) => {
         try {
-          if (input.mode === "photo" && input.photoUrl) {
-            return await recognizeFoodFromPhoto(input.photoUrl);
-          } else if (input.mode === "voice" && input.audioUrl) {
-            return await recognizeFoodFromVoice(input.audioUrl);
-          } else if (input.mode === "photo+voice" && input.photoUrl && input.audioUrl) {
+          if (input.photoUrl && input.audioUrl) {
             return await recognizeFoodFromPhotoAndVoice(input.photoUrl, input.audioUrl);
+          } else if (input.photoUrl) {
+            return await recognizeFoodFromPhoto(input.photoUrl);
+          } else if (input.audioUrl) {
+            return await recognizeFoodFromVoice(input.audioUrl);
           } else {
-            throw new Error("Invalid mode or missing required data");
+            throw new Error("Please provide a photo or voice description");
           }
         } catch (error) {
           console.error("[Food Recognition] Error:", error);

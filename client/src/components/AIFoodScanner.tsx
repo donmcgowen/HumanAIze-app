@@ -1,9 +1,14 @@
-import React, { useRef, useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
-import { Loader2, Camera, Mic, X } from "lucide-react";
-import { trpc } from "@/lib/trpc";
+'use client';
+
+import { useRef, useEffect, useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
+import { Loader2, Camera, Mic, X, Check } from 'lucide-react';
+import { trpc } from '@/lib/trpc';
 
 interface FoodRecognitionResult {
   foods: Array<{
@@ -19,30 +24,43 @@ interface FoodRecognitionResult {
 interface AIFoodScannerProps {
   isOpen: boolean;
   onClose: () => void;
-  onFoodsRecognized: (foods: FoodRecognitionResult["foods"]) => void;
+  onFoodsRecognized: (foods: FoodRecognitionResult['foods']) => void;
 }
 
 export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
-  const [mode, setMode] = useState<"photo" | "voice" | "photo+voice">("photo");
-  const [isRecording, setIsRecording] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [stage, setStage] = useState<'camera' | 'preview' | 'description'>('camera');
   const [photoData, setPhotoData] = useState<string | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
   const [cameraActive, setCameraActive] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordedAudio, setRecordedAudio] = useState<Blob | null>(null);
+  const [textDescription, setTextDescription] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const recognizeWithAI = trpc.food.recognizeWithAI.useMutation({
+    onSuccess: (result) => {
+      onFoodsRecognized(result.foods);
+      handleClose();
+      toast.success(`Recognized: ${result.foods.map((f) => f.name).join(', ')}`);
+    },
+    onError: (error) => {
+      toast.error('Failed to analyze food. Please try again.');
+      console.error('Recognition error:', error);
+    },
+  });
 
   // Initialize camera
   useEffect(() => {
-    if (!isOpen || cameraActive) return;
+    if (!isOpen || stage !== 'camera' || cameraActive) return;
 
     const initCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
         if (videoRef.current) {
@@ -51,8 +69,8 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
           setCameraActive(true);
         }
       } catch (error) {
-        console.error("Camera error:", error);
-        toast.error("Camera not available. Please check permissions.");
+        console.error('Camera error:', error);
+        toast.error('Camera not available. Please check permissions.');
       }
     };
 
@@ -64,22 +82,23 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
         setCameraActive(false);
       }
     };
-  }, [isOpen, cameraActive]);
+  }, [isOpen, stage, cameraActive]);
 
   // Capture photo from camera
   const capturePhoto = () => {
     if (!videoRef.current || !canvasRef.current) return;
 
-    const context = canvasRef.current.getContext("2d");
+    const context = canvasRef.current.getContext('2d');
     if (!context) return;
 
     canvasRef.current.width = videoRef.current.videoWidth;
     canvasRef.current.height = videoRef.current.videoHeight;
     context.drawImage(videoRef.current, 0, 0);
 
-    const imageData = canvasRef.current.toDataURL("image/jpeg");
+    const imageData = canvasRef.current.toDataURL('image/jpeg');
     setPhotoData(imageData);
-    toast.success("Photo captured!");
+    setStage('preview');
+    toast.success('Photo captured!');
   };
 
   // Start voice recording
@@ -94,243 +113,222 @@ export function AIFoodScanner({ isOpen, onClose, onFoodsRecognized }: AIFoodScan
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(chunks, { type: "audio/webm" });
-        setAudioChunks([audioBlob]);
+        const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+        setRecordedAudio(audioBlob);
         stream.getTracks().forEach((track) => track.stop());
+        setIsRecording(false);
+        toast.success('Voice recorded!');
       };
 
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
-      toast.success("Recording started...");
     } catch (error) {
-      console.error("Microphone error:", error);
-      toast.error("Microphone not available. Please check permissions.");
+      console.error('Microphone error:', error);
+      toast.error('Microphone not available.');
     }
   };
 
-  // Stop voice recording
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      toast.success("Recording stopped!");
     }
   };
 
-  // Upload file to S3 and get URL
-  const uploadToStorage = async (blob: Blob, fileName: string): Promise<string> => {
-    const formData = new FormData();
-    formData.append("file", blob, fileName);
-
-    const response = await fetch("/api/storage/upload", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to upload file");
-    }
-
-    const data = await response.json();
-    return data.url;
-  };
-
-  // Analyze food using Gemini AI
-  const analyzeFoods = async () => {
-    if (mode === "photo" && !photoData) {
-      toast.error("Please capture a photo first");
-      return;
-    }
-    if ((mode === "voice" || mode === "photo+voice") && audioChunks.length === 0) {
-      toast.error("Please record voice description first");
+  // Analyze food with Gemini
+  const analyzeFood = async () => {
+    if (!photoData) {
+      toast.error('Please capture a photo first');
       return;
     }
 
     setIsAnalyzing(true);
     try {
-      let photoUrl: string | undefined;
-      let audioUrl: string | undefined;
+      // Convert base64 to blob for upload
+      const response = await fetch(photoData);
+      const photoBlob = await response.blob();
 
-      // Upload photo if available
-      if (photoData) {
-        const photoBlob = await fetch(photoData).then((res) => res.blob());
-        photoUrl = await uploadToStorage(photoBlob, `food-${Date.now()}.jpg`);
-      }
+      // Upload photo to storage
+      const formData = new FormData();
+      formData.append('file', photoBlob, 'food.jpg');
 
-      // Upload audio if available
-      if (audioChunks.length > 0) {
-        audioUrl = await uploadToStorage(audioChunks[0], `voice-${Date.now()}.webm`);
-      }
-
-      // Call backend AI recognition
-      const result = await trpc.food.recognizeWithAI.useMutation().mutateAsync({
-        mode,
-        photoUrl,
-        audioUrl,
+      const uploadRes = await fetch('/api/storage/upload', {
+        method: 'POST',
+        body: formData,
       });
 
-      if (result.foods && result.foods.length > 0) {
-        onFoodsRecognized(result.foods);
-        toast.success(`Recognized ${result.foods.length} food item(s)!`);
-        onClose();
-      } else {
-        toast.error("No foods detected. Try again with a clearer image or description.");
+      if (!uploadRes.ok) throw new Error('Failed to upload photo');
+      const { url: photoUrl } = await uploadRes.json();
+
+      // Upload audio if recorded
+      let audioUrl: string | undefined;
+      if (recordedAudio) {
+        const audioFormData = new FormData();
+        audioFormData.append('file', recordedAudio, 'description.webm');
+
+        const audioRes = await fetch('/api/storage/upload', {
+          method: 'POST',
+          body: audioFormData,
+        });
+
+        if (audioRes.ok) {
+          const { url } = await audioRes.json();
+          audioUrl = url;
+        }
       }
+
+      // Call recognition endpoint
+      await recognizeWithAI.mutateAsync({
+        photoUrl,
+        audioUrl,
+        textDescription: textDescription || '',
+      });
     } catch (error) {
-      console.error("Analysis error:", error);
-      toast.error("Failed to analyze food. Please try again.");
+      console.error('Analysis error:', error);
+      toast.error('Failed to analyze food');
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // Reset scanner
-  const reset = () => {
+  const handleClose = () => {
+    // Stop camera
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    // Stop recording
+    if (isRecording && mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+    }
+    // Reset state
+    setStage('camera');
     setPhotoData(null);
-    setAudioChunks([]);
+    setCameraActive(false);
     setIsRecording(false);
+    setRecordedAudio(null);
+    setTextDescription('');
+    onClose();
   };
 
-  if (!isOpen) return null;
+  const retakePhoto = () => {
+    setPhotoData(null);
+    setRecordedAudio(null);
+    setTextDescription('');
+    setStage('camera');
+  };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <Card className="w-full max-w-2xl mx-4">
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <div>
-            <CardTitle>AI Food Scanner</CardTitle>
-            <CardDescription>Take a photo or describe your food with voice</CardDescription>
-          </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
-        </CardHeader>
+    <Dialog open={isOpen} onOpenChange={handleClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>AI Food Scanner</DialogTitle>
+        </DialogHeader>
 
-        <CardContent className="space-y-4">
-          {/* Mode Selection */}
-          <div className="flex gap-2">
+        {stage === 'camera' && (
+          <div className="space-y-4">
+            <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              <canvas ref={canvasRef} className="hidden" />
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={capturePhoto}
+                className="flex-1 bg-cyan-500 hover:bg-cyan-600"
+                disabled={!cameraActive}
+              >
+                <Camera className="h-4 w-4 mr-2" />
+                Take Photo
+              </Button>
+              <Button variant="outline" onClick={handleClose}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {stage === 'preview' && photoData && (
+          <div className="space-y-4">
+            <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+              <img src={photoData} alt="Captured food" className="w-full h-full object-cover" />
+            </div>
+
             <Button
-              variant={mode === "photo" ? "default" : "outline"}
-              onClick={() => {
-                setMode("photo");
-                reset();
-              }}
-              className="flex-1"
+              onClick={() => setStage('description')}
+              className="w-full bg-cyan-500 hover:bg-cyan-600"
             >
-              <Camera className="mr-2 h-4 w-4" />
-              Photo Only
+              <Check className="h-4 w-4 mr-2" />
+              Analyze Food
             </Button>
-            <Button
-              variant={mode === "voice" ? "default" : "outline"}
-              onClick={() => {
-                setMode("voice");
-                reset();
-              }}
-              className="flex-1"
-            >
-              <Mic className="mr-2 h-4 w-4" />
-              Voice Only
-            </Button>
-            <Button
-              variant={mode === "photo+voice" ? "default" : "outline"}
-              onClick={() => {
-                setMode("photo+voice");
-                reset();
-              }}
-              className="flex-1"
-            >
-              <Camera className="mr-2 h-4 w-4" />
-              <Mic className="mr-2 h-4 w-4" />
-              Both
+
+            <Button variant="outline" onClick={retakePhoto} className="w-full">
+              Retake Photo
             </Button>
           </div>
+        )}
 
-          {/* Photo Mode */}
-          {(mode === "photo" || mode === "photo+voice") && (
+        {stage === 'description' && photoData && (
+          <div className="space-y-4">
+            <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+              <img src={photoData} alt="Captured food" className="w-full h-full object-cover" />
+            </div>
+
             <div className="space-y-2">
-              <h3 className="font-semibold">Camera</h3>
-              {!photoData ? (
+              <Label className="text-xs text-slate-400">
+                Optional: Describe the food to help AI calculate macros accurately
+              </Label>
+            <Textarea
+                placeholder="e.g., Grilled chicken breast with rice and broccoli"
+                value={textDescription}
+                onChange={(e) => setTextDescription(e.target.value)}
+                className="bg-white/10 border-white/20 text-sm min-h-20"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-slate-400">Or record a voice description</Label>
+              <Button
+                onClick={isRecording ? stopRecording : startRecording}
+                variant={isRecording ? 'destructive' : 'outline'}
+                className="w-full"
+              >
+                <Mic className="h-4 w-4 mr-2" />
+                {isRecording ? 'Stop Recording' : 'Record Voice'}
+              </Button>
+              {recordedAudio && (
+                <div className="text-xs text-green-400">✓ Voice recorded</div>
+              )}
+            </div>
+
+            <Button
+              onClick={analyzeFood}
+              disabled={isAnalyzing}
+              className="w-full bg-cyan-500 hover:bg-cyan-600"
+            >
+              {isAnalyzing ? (
                 <>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    className="w-full rounded-lg bg-black"
-                  />
-                  <Button onClick={capturePhoto} className="w-full">
-                    <Camera className="mr-2 h-4 w-4" />
-                    Capture Photo
-                  </Button>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Analyzing...
                 </>
               ) : (
                 <>
-                  <img src={photoData} alt="Captured food" className="w-full rounded-lg" />
-                  <Button
-                    variant="outline"
-                    onClick={() => setPhotoData(null)}
-                    className="w-full"
-                  >
-                    Retake Photo
-                  </Button>
+                  <Check className="h-4 w-4 mr-2" />
+                  Analyze & Add Food
                 </>
               )}
-            </div>
-          )}
+            </Button>
 
-          {/* Voice Mode */}
-          {(mode === "voice" || mode === "photo+voice") && (
-            <div className="space-y-2">
-              <h3 className="font-semibold">Voice Description</h3>
-              {audioChunks.length === 0 ? (
-                <Button
-                  onClick={isRecording ? stopRecording : startRecording}
-                  variant={isRecording ? "destructive" : "default"}
-                  className="w-full"
-                >
-                  <Mic className="mr-2 h-4 w-4" />
-                  {isRecording ? "Stop Recording" : "Start Recording"}
-                </Button>
-              ) : (
-                <>
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
-                    ✓ Voice recording captured
-                  </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setAudioChunks([]);
-                      setIsRecording(false);
-                    }}
-                    className="w-full"
-                  >
-                    Re-record
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Analyze Button */}
-          <Button
-            onClick={analyzeFoods}
-            disabled={isAnalyzing}
-            className="w-full"
-          >
-            {isAnalyzing ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Analyzing with AI...
-              </>
-            ) : (
-              "Analyze & Get Macros"
-            )}
-          </Button>
-
-          {/* Hidden canvas for photo capture */}
-          <canvas ref={canvasRef} className="hidden" />
-        </CardContent>
-      </Card>
-    </div>
+            <Button variant="outline" onClick={retakePhoto} className="w-full">
+              Retake Photo
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
