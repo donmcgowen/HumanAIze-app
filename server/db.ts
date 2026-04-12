@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, lt, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache } from "../drizzle/schema";
+import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -684,4 +684,69 @@ export async function cleanupExpiredCache(): Promise<void> {
   } catch (error) {
     console.warn("[Database] Error cleaning up expired cache:", error);
   }
+}
+
+// Progress Photos Functions
+export async function addProgressPhoto(userId: number, photo: Omit<InsertProgressPhoto, "userId">): Promise<ProgressPhoto> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available");
+  }
+
+  const newPhoto: InsertProgressPhoto = {
+    userId,
+    ...photo,
+  };
+
+  await db.insert(progressPhotos).values(newPhoto);
+
+  const created = await db
+    .select()
+    .from(progressPhotos)
+    .where(eq(progressPhotos.userId, userId))
+    .orderBy((t) => desc(t.photoDate))
+    .limit(1);
+
+  if (!created || created.length === 0) throw new Error("Failed to create progress photo");
+  return created[0];
+}
+
+export async function getProgressPhotos(userId: number): Promise<ProgressPhoto[]> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get progress photos: database not available");
+    return [];
+  }
+
+  return db.select().from(progressPhotos).where(eq(progressPhotos.userId, userId)).orderBy((t) => desc(t.photoDate));
+}
+
+export async function deleteProgressPhoto(photoId: number, userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available");
+  }
+
+  await db.delete(progressPhotos).where(and(eq(progressPhotos.id, photoId), eq(progressPhotos.userId, userId)));
+  return true;
+}
+
+export async function updateProgressPhoto(
+  photoId: number,
+  userId: number,
+  updates: Partial<Omit<InsertProgressPhoto, "userId">>
+): Promise<ProgressPhoto> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available");
+  }
+
+  await db
+    .update(progressPhotos)
+    .set(updates)
+    .where(and(eq(progressPhotos.id, photoId), eq(progressPhotos.userId, userId)));
+
+  const updated = await db.select().from(progressPhotos).where(eq(progressPhotos.id, photoId)).limit(1);
+  if (!updated || updated.length === 0) throw new Error("Failed to update progress photo");
+  return updated[0];
 }

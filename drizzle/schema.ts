@@ -299,3 +299,18 @@ export const foodSearchCache = mysqlTable("food_search_cache", {
 
 export type FoodSearchCache = typeof foodSearchCache.$inferSelect;
 export type InsertFoodSearchCache = typeof foodSearchCache.$inferInsert;
+
+export const progressPhotos = mysqlTable("progress_photos", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id),
+  photoUrl: text("photoUrl").notNull(),
+  photoKey: varchar("photoKey", { length: 255 }).notNull(), // S3 key for storage reference
+  photoName: varchar("photoName", { length: 191 }).notNull(),
+  photoDate: bigint("photoDate", { mode: "number" }).notNull(), // Unix timestamp
+  description: text("description"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ProgressPhoto = typeof progressPhotos.$inferSelect;
+export type InsertProgressPhoto = typeof progressPhotos.$inferInsert;

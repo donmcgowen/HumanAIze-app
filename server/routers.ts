@@ -3,6 +3,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { TRPCError } from "@trpc/server";
 import {
   connectSource,
   createChatThread,
@@ -22,7 +23,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto } from "./db";
 import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
@@ -79,6 +80,72 @@ const aiRouter = router({
 export const appRouter = router({
   system: systemRouter,
   ai: aiRouter,
+  progressPhotos: router({
+    getPhotos: protectedProcedure.query(async ({ ctx }) => {
+      const photos = await getProgressPhotos(ctx.user.id);
+      return photos;
+    }),
+    uploadPhoto: protectedProcedure
+      .input(
+        z.object({
+          photoBase64: z.string(),
+          photoName: z.string().min(1),
+          photoDate: z.number(),
+          description: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const buffer = Buffer.from(input.photoBase64, "base64");
+          const photoKey = `progress-photos/${ctx.user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
+          const { url } = await storagePut(photoKey, buffer, "image/jpeg");
+          const photo = await addProgressPhoto(ctx.user.id, {
+            photoUrl: url,
+            photoKey,
+            photoName: input.photoName,
+            photoDate: input.photoDate,
+            description: input.description,
+          });
+          return photo;
+        } catch (error) {
+          console.error("[Progress Photos] Error uploading photo:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to upload photo" });
+        }
+      }),
+    deletePhoto: protectedProcedure
+      .input(z.object({ photoId: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const success = await deleteProgressPhoto(input.photoId, ctx.user.id);
+          return { success };
+        } catch (error) {
+          console.error("[Progress Photos] Error deleting photo:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to delete photo" });
+        }
+      }),
+    updatePhoto: protectedProcedure
+      .input(
+        z.object({
+          photoId: z.number(),
+          photoName: z.string().optional(),
+          photoDate: z.number().optional(),
+          description: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const photo = await updateProgressPhoto(ctx.user.id, input.photoId, {
+            photoName: input.photoName,
+            photoDate: input.photoDate,
+            description: input.description,
+          });
+          return photo;
+        } catch (error) {
+          console.error("[Progress Photos] Error updating photo:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to update photo" });
+        }
+      }),
+  }),
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -568,5 +635,3 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
-
-// Add AI meal analysis router (will be inserted before the closing brace)

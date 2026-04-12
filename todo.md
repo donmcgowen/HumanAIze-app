@@ -779,3 +779,32 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Remove Recently Added section from main UI to declutter
 - [x] Ensure Add Food button is always visible and accessible
 - [x] Users can access recent foods through Favorites instead
+
+
+## Enhancement - Progress Photos Section (v1.59)
+
+- [ ] Create progressPhotos table in database schema
+- [ ] Add photo storage and retrieval functions in db.ts
+- [ ] Create tRPC procedures for photo upload, retrieval, and deletion
+- [ ] Build ProgressPhotos component with camera capture UI
+- [ ] Implement camera access with getUserMedia API
+- [ ] Add photo upload from existing files
+- [ ] Add name and date fields for each photo
+- [ ] Display progress photos gallery in Profile page
+- [ ] Add delete functionality for photos
+- [ ] Test camera capture on mobile and desktop
+- [ ] Test photo upload and storage
+
+
+## Enhancement - Progress Photos Section in Profile (v1.59 - COMPLETE)
+
+- [x] Create progressPhotos table in database schema
+- [x] Add backend procedures for photo upload, retrieval, and deletion
+- [x] Build ProgressPhotos component with camera capture
+- [x] Implement file upload option for existing photos
+- [x] Add photo name and date input fields
+- [x] Store photos in S3 with database metadata
+- [x] Display progress photos in grid layout
+- [x] Add delete functionality with hover overlay
+- [x] Integrate ProgressPhotos component into Profile page
+- [x] Test camera capture and photo upload

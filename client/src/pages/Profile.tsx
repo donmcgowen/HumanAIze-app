@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InsightsPanel } from "@/components/InsightsPanel";
 import { MacroCalculator } from "@/components/MacroCalculator";
+import { ProgressPhotos } from "@/components/ProgressPhotos";
 import { toast } from "sonner";
 import { Loader2, Settings } from "lucide-react";
 import type { ActivityLevel, MacroSuggestion } from "../../../shared/macroCalculator";
@@ -581,6 +582,17 @@ export function Profile() {
               isLoading={updateProfile.isPending}
             />
           )}
+
+          {/* Progress Photos Section */}
+          <Card className="border border-white/10 bg-slate-950">
+            <CardHeader>
+              <CardTitle className="text-white">Progress Photos</CardTitle>
+              <CardDescription>Track your physical transformation with photos</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ProgressPhotos />
+            </CardContent>
+          </Card>
 
           {/* Insights Section */}
           <InsightsPanel 
