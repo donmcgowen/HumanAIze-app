@@ -36,48 +36,49 @@ import { searchFoodWithGemini, calculateMacrosForServing } from "./geminiFood";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
+});
 
-  ai: router({
-    analyzeMeal: protectedProcedure
-      .input(
-        z.object({
-          meals: z.array(
-            z.object({
-              foodName: z.string(),
-              calories: z.number().int().positive(),
-              protein: z.number().int().nonnegative(),
-              carbs: z.number().int().nonnegative(),
-              fat: z.number().int().nonnegative(),
-              quantity: z.number().optional(),
-              unit: z.string().optional(),
-            })
-          ),
-          dailyTargets: z.object({
-            dailyCalories: z.number().int().positive(),
-            dailyProtein: z.number().int().positive(),
-            dailyCarbs: z.number().int().positive(),
-            dailyFat: z.number().int().positive(),
-          }),
-          consumedSoFar: z.object({
-            calories: z.number().int().nonnegative(),
+const aiRouter = router({
+  analyzeMeal: protectedProcedure
+    .input(
+      z.object({
+        meals: z.array(
+          z.object({
+            foodName: z.string(),
+            calories: z.number().int().positive(),
             protein: z.number().int().nonnegative(),
             carbs: z.number().int().nonnegative(),
             fat: z.number().int().nonnegative(),
-          }),
-        })
-      )
-      .mutation(async ({ input }) => {
-        return analyzeMealWithAI(
-          input.meals,
-          input.dailyTargets,
-          input.consumedSoFar
-        );
-      }),
-  }),
+            quantity: z.number().optional(),
+            unit: z.string().optional(),
+          })
+        ),
+        dailyTargets: z.object({
+          dailyCalories: z.number().int().positive(),
+          dailyProtein: z.number().int().positive(),
+          dailyCarbs: z.number().int().positive(),
+          dailyFat: z.number().int().positive(),
+        }),
+        consumedSoFar: z.object({
+          calories: z.number().int().nonnegative(),
+          protein: z.number().int().nonnegative(),
+          carbs: z.number().int().nonnegative(),
+          fat: z.number().int().nonnegative(),
+        }),
+      })
+    )
+    .mutation(async ({ input }) => {
+      return analyzeMealWithAI(
+        input.meals,
+        input.dailyTargets,
+        input.consumedSoFar
+      );
+    }),
 });
 
 export const appRouter = router({
   system: systemRouter,
+  ai: aiRouter,
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

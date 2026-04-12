@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 
 export default function Dashboard() {
-  const { data: dashboard, isLoading } = trpc.health.dashboard.useQuery({ ai: undefined, rangeDays: 14 });
+  const { data: dashboard, isLoading } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 

@@ -8,7 +8,7 @@ import { Streamdown } from "streamdown";
 
 export default function Assistant() {
   const { data: threadData, isLoading: threadsLoading, refetch: refetchThreads } = trpc.assistant.messages.useQuery();
-  const { data: dashboard } = trpc.health.dashboard.useQuery({ ai: undefined, rangeDays: 14 });
+  const { data: dashboard } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const createThreadMutation = trpc.assistant.createThread.useMutation();
   const sendMessageMutation = trpc.assistant.sendMessage.useMutation();
   const [input, setInput] = useState("");

@@ -6,7 +6,7 @@ import { TrendingUp, TrendingDown, Calendar } from "lucide-react";
 
 export default function History() {
   const [rangeDays, setRangeDays] = useState(14);
-  const { data: history, isLoading } = trpc.health.history.useQuery({ ai: undefined, rangeDays });
+  const { data: history, isLoading } = trpc.health.history.useQuery({ rangeDays });
 
   if (isLoading) {
     return (

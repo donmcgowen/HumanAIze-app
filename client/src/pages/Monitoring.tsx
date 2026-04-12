@@ -10,7 +10,7 @@ import { useState } from "react";
 export function Monitoring() {
   const { data: user, isLoading } = trpc.auth.me.useQuery();
   const { data: sources, isLoading: sourcesLoading } = trpc.sources.list.useQuery();
-  const { data: dashboard } = trpc.health.dashboard.useQuery({ ai: undefined, rangeDays: 14 });
+  const { data: dashboard } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const [, navigate] = useLocation();
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
 
