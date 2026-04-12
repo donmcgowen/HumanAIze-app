@@ -96,9 +96,12 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         try {
-          const buffer = Buffer.from(input.photoBase64, "base64");
+          const { compressImage } = await import("./imageCompression");
+          let buffer = Buffer.from(input.photoBase64, "base64");
+          const compressedBuffer = await compressImage(buffer, "image/jpeg");
+          buffer = compressedBuffer as any;
           const photoKey = `progress-photos/${ctx.user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
-          const { url } = await storagePut(photoKey, buffer, "image/jpeg");
+          const { url } = await storagePut(photoKey, buffer as any, "image/jpeg");
           const photo = await addProgressPhoto(ctx.user.id, {
             photoUrl: url,
             photoKey,
@@ -635,3 +638,7 @@ export const appRouter = router({
 });
 
 export type AppRouter = typeof appRouter;
+
+// Note: Image compression is now handled in the uploadPhoto procedure
+// The compressImage function from imageCompression.ts is used to resize
+// photos to 1MB limit before uploading to S3

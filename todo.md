@@ -805,3 +805,25 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Verify data persists after page reload
 - [x] Add success toast notification when profile saves
 - [x] Fix "No values to set" database error when saving empty fields
+
+
+## Bug Report - Photo Upload Failing (v1.61 - COMPLETE)
+
+- [x] Execute migration SQL to create progress_photos table
+- [x] Investigate photo upload error in Progress Photos
+- [x] Check file size and format validation
+- [x] Verify S3 upload is working correctly
+- [x] Test with provided progress photo
+- [x] Fix any database or API issues
+- [x] Verify photo appears in gallery after upload
+- [x] Test with both camera capture and file upload
+
+## Enhancement - Image Compression for Photos (v1.62 - COMPLETE)
+
+- [x] Add image compression library (sharp or similar)
+- [x] Implement resize logic to compress photos to 1MB limit
+- [x] Maintain aspect ratio during resize
+- [x] Test compression with various image sizes
+- [x] Verify compressed photos upload successfully
+- [x] Write 8 comprehensive unit tests for image compression
+- [x] All tests passing: compression, format support, size limits, edge cases
