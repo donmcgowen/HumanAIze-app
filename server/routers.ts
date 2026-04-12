@@ -27,6 +27,7 @@ import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
 import { generateFoodInsights, type DailyMacros } from "./insights";
+import { getMealSuggestions, getMealSuggestionsByCategory } from "@shared/mealSuggestions";
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
 import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoAndVoice } from "./foodRecognition";
 import { storagePut } from "./storage";
@@ -417,6 +418,50 @@ export const appRouter = router({
     deleteMeal: protectedProcedure
       .input(z.object({ mealTemplateId: z.number().int().positive() }))
       .mutation(({ ctx, input }) => deleteMealTemplate(input.mealTemplateId, ctx.user.id)),
+    getSuggestions: protectedProcedure
+      .input(
+        z.object({
+          caloriesRemaining: z.number().min(0),
+          proteinRemaining: z.number().min(0),
+          carbsRemaining: z.number().min(0),
+          fatRemaining: z.number().min(0),
+          limit: z.number().int().min(1).max(10).default(5),
+        })
+      )
+      .query(({ input }) => {
+        return getMealSuggestions(
+          {
+            calories: input.caloriesRemaining,
+            protein: input.proteinRemaining,
+            carbs: input.carbsRemaining,
+            fat: input.fatRemaining,
+          },
+          input.limit
+        );
+      }),
+    getSuggestionsByCategory: protectedProcedure
+      .input(
+        z.object({
+          caloriesRemaining: z.number().min(0),
+          proteinRemaining: z.number().min(0),
+          carbsRemaining: z.number().min(0),
+          fatRemaining: z.number().min(0),
+          category: z.enum(["protein", "carb", "fat", "balanced", "snack"]),
+          limit: z.number().int().min(1).max(10).default(3),
+        })
+      )
+      .query(({ input }) => {
+        return getMealSuggestionsByCategory(
+          {
+            calories: input.caloriesRemaining,
+            protein: input.proteinRemaining,
+            carbs: input.carbsRemaining,
+            fat: input.fatRemaining,
+          },
+          input.category,
+          input.limit
+        );
+      }),
   }),
   sync: router({
     status: protectedProcedure.query(() => getSyncStatus()),

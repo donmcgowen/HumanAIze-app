@@ -1,6 +1,7 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Lightbulb, TrendingUp, AlertCircle, CheckCircle } from "lucide-react";
 import { Loader2 } from "lucide-react";
+import { MealSuggestions } from "./MealSuggestions";
 
 interface InsightRecommendation {
   category: "food_choice" | "portion_size" | "macro_balance" | "meal_timing";
@@ -184,6 +185,16 @@ export function FoodInsights({
               </p>
             </div>
           )}
+        </div>
+
+        {/* Meal Suggestions */}
+        <div className="border-t border-white/10 pt-4">
+          <MealSuggestions
+            caloriesRemaining={Math.max(0, dailyCalorieGoal - currentCalories)}
+            proteinRemaining={Math.max(0, dailyProteinGoal - currentProtein)}
+            carbsRemaining={Math.max(0, dailyCarbGoal - currentCarbs)}
+            fatRemaining={Math.max(0, dailyFatGoal - currentFat)}
+          />
         </div>
 
         {/* Quick Tips */}
