@@ -854,14 +854,14 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 
 ## Enhancement - Dexcom Clarity PDF/CSV Upload (v1.64)
 
-- [ ] Add PDF upload button to Dexcom Clarity import section
-- [ ] Display both CSV and PDF upload options side-by-side
-- [ ] Implement PDF file reading and parsing
-- [ ] Implement CSV file reading and parsing
-- [ ] Extract glucose data from both file formats
-- [ ] Handle file upload errors gracefully
-- [ ] Test with sample Dexcom CSV and PDF files
-- [ ] Verify data extraction accuracy
+- [x] Add PDF upload button to Dexcom Clarity import section
+- [x] Display both CSV and PDF upload options side-by-side
+- [x] Implement PDF file reading and parsing
+- [x] Implement CSV file reading and parsing
+- [x] Extract glucose data from both file formats
+- [x] Handle file upload errors gracefully
+- [x] Test with sample Dexcom CSV and PDF files
+- [x] Verify data extraction accuracy
 
 ## Enhancement - CSV/PDF Import with Database Storage & Statistics (v1.65 - IN PROGRESS)
 
@@ -880,7 +880,7 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Show time in range metrics: TIR%, TAR%, TBR%
 - [x] Show A1C estimate
 - [x] Show date range of imported data
-- [ ] Test import with sample Dexcom CSV and PDF data
+- [x] Test import with sample Dexcom CSV and PDF data
 
 
 ## Enhancement - Food Logging Recommendations Repositioning (v1.66 - DEFERRED)
