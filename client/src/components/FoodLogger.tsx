@@ -736,15 +736,7 @@ export function FoodLogger() {
             </div>
           )}
 
-          {/* Add Button */}
-          <Button
-            onClick={handleAddFood}
-            disabled={addFoodLog.isPending || (useManualEntry ? !manualFoodName || !manualCalories : !selectedFood || !quantity)}
-            className="w-full bg-cyan-500 hover:bg-cyan-600 text-white"
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            {addFoodLog.isPending ? "Adding..." : "Add to Log"}
-          </Button>
+
         </CardContent>
       </Card>
 
