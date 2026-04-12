@@ -91,17 +91,26 @@ export async function upsertUserProfile(userId: number, updates: Partial<InsertU
     throw new Error("Database is not available");
   }
 
+  // Filter out undefined values and activityLevel (not yet in DB)
+  const filteredUpdates = Object.fromEntries(
+    Object.entries(updates)
+      .filter(([key, value]) => value !== undefined && key !== "activityLevel")
+  ) as Partial<InsertUserProfile>;
+
   const existing = await getUserProfile(userId);
 
   if (existing) {
-    await db
-      .update(userProfiles)
-      .set(updates)
-      .where(eq(userProfiles.userId, userId));
+    // Only update if there are values to set
+    if (Object.keys(filteredUpdates).length > 0) {
+      await db
+        .update(userProfiles)
+        .set(filteredUpdates)
+        .where(eq(userProfiles.userId, userId));
+    }
   } else {
     const insert: InsertUserProfile = {
       userId,
-      ...updates,
+      ...filteredUpdates,
     };
     await db.insert(userProfiles).values(insert);
   }

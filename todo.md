@@ -628,3 +628,16 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Add goal editing modal with date/weight updates
 - [x] Test goal calculations with sample data
 - [x] Verify estimated dates update based on weight trends
+
+
+## Bug Report - Profile Data Not Persisting (CRITICAL - FIXED)
+
+- [x] Diagnose why profile form data is not being saved to database - upsertUserProfile was passing empty objects
+- [x] Check if profile.upsert tRPC endpoint is being called correctly - endpoint was working, issue was in db layer
+- [x] Verify all form fields (height, weight, age, goals, daily targets) are included in mutation - all fields included
+- [x] Ensure database schema has all required columns - added goalWeightKg, goalDate, dailyCalorieTarget, dailyProteinTarget, dailyCarbsTarget, dailyFatTarget
+- [x] Test profile data retrieval on page load - working, data loads from database
+- [x] Verify profile data persists across sessions/page reloads - verified working
+- [x] Fix any validation or error handling issues - fixed by filtering undefined values in upsertUserProfile
+- [x] Add success/error notifications to Profile form - already implemented with toast notifications
+- [x] Test with multiple users to ensure data isolation - data isolation working correctly

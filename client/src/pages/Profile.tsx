@@ -71,10 +71,7 @@ export function Profile() {
       setDailyProteinTarget(profile.dailyProteinTarget?.toString() || "");
       setDailyCarbsTarget(profile.dailyCarbsTarget?.toString() || "");
       setDailyFatTarget(profile.dailyFatTarget?.toString() || "");
-      // Load activity level
-      if (profile.activityLevel) {
-        setActivityLevel(profile.activityLevel as ActivityLevel);
-      }
+      // Activity level will be added after database migration
       // Load goal data
       setGoalWeightKg(profile.goalWeightKg?.toString() || "");
       if (profile.goalDate) {
@@ -173,7 +170,7 @@ export function Profile() {
         weightKg: weightKgValue,
         ageYears: formData.ageYears ? parseInt(formData.ageYears) : undefined,
         fitnessGoal: (formData.fitnessGoal as "lose_fat" | "build_muscle" | "maintain") || undefined,
-        activityLevel: activityLevel,
+        // activityLevel will be added after database migration
         goalWeightKg: goalWeightValue,
         goalDate: goalDateTimestamp,
         dailyCalorieTarget: dailyCalorieTarget ? parseInt(dailyCalorieTarget) : undefined,
