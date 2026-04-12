@@ -129,6 +129,12 @@ export async function upsertUserProfile(userId: number, profile: Partial<InsertU
     if (profile.weightKg !== undefined) updateData.weightKg = profile.weightKg;
     if (profile.ageYears !== undefined) updateData.ageYears = profile.ageYears;
     if (profile.fitnessGoal !== undefined) updateData.fitnessGoal = profile.fitnessGoal;
+    if (profile.goalWeightKg !== undefined) updateData.goalWeightKg = profile.goalWeightKg;
+    if (profile.goalDate !== undefined) updateData.goalDate = profile.goalDate;
+    if (profile.dailyCalorieTarget !== undefined) updateData.dailyCalorieTarget = profile.dailyCalorieTarget;
+    if (profile.dailyProteinTarget !== undefined) updateData.dailyProteinTarget = profile.dailyProteinTarget;
+    if (profile.dailyCarbsTarget !== undefined) updateData.dailyCarbsTarget = profile.dailyCarbsTarget;
+    if (profile.dailyFatTarget !== undefined) updateData.dailyFatTarget = profile.dailyFatTarget;
     
     await db.update(userProfiles).set(updateData).where(eq(userProfiles.userId, userId));
     
@@ -143,6 +149,12 @@ export async function upsertUserProfile(userId: number, profile: Partial<InsertU
       weightKg: profile.weightKg,
       ageYears: profile.ageYears,
       fitnessGoal: profile.fitnessGoal,
+      goalWeightKg: profile.goalWeightKg,
+      goalDate: profile.goalDate,
+      dailyCalorieTarget: profile.dailyCalorieTarget,
+      dailyProteinTarget: profile.dailyProteinTarget,
+      dailyCarbsTarget: profile.dailyCarbsTarget,
+      dailyFatTarget: profile.dailyFatTarget,
     };
     
     await db.insert(userProfiles).values(newProfile);

@@ -575,3 +575,15 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Fix recommendations display logic - enabled insights query even without profile
 - [x] Test with logged food data
 - [x] Verify AI insights show personalized recommendations - working with Gemini AI
+
+
+## Feature - Personalized Daily Targets for AI Recommendations (v1.44 - COMPLETE)
+
+- [x] Fix profile query error handling - gracefully return undefined instead of throwing
+- [x] Implement profile data persistence for dailyCalorieTarget, dailyProteinTarget, dailyCarbsTarget, dailyFatTarget
+- [x] Update upsertUserProfile to persist all daily target fields
+- [x] Update Profile UI to show and edit daily targets - added editable input fields
+- [x] Update FoodLogger to fetch and use personalized targets from profile
+- [x] Update generateInsights to use profile targets when available
+- [x] Test end-to-end: set custom targets in profile, verify recommendations use them
+- [x] Verify recommendations change when targets are updated

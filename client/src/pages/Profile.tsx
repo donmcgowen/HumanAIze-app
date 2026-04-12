@@ -27,6 +27,10 @@ export function Profile() {
   const [goalWeightKg, setGoalWeightKg] = useState<string>("");
   const [goalDate, setGoalDate] = useState<string>("");
   const [dailyTargets, setDailyTargets] = useState<any>(null);
+  const [dailyCalorieTarget, setDailyCalorieTarget] = useState<string>("");
+  const [dailyProteinTarget, setDailyProteinTarget] = useState<string>("");
+  const [dailyCarbsTarget, setDailyCarbsTarget] = useState<string>("");
+  const [dailyFatTarget, setDailyFatTarget] = useState<string>("");
 
   // Unit conversion helpers
   const convertWeight = (kg: number, toUnit: "kg" | "lbs") => {
@@ -58,6 +62,17 @@ export function Profile() {
         ageYears: profile.ageYears?.toString() || "",
         fitnessGoal: profile.fitnessGoal || "",
       });
+      // Load persisted daily targets
+      setDailyCalorieTarget(profile.dailyCalorieTarget?.toString() || "");
+      setDailyProteinTarget(profile.dailyProteinTarget?.toString() || "");
+      setDailyCarbsTarget(profile.dailyCarbsTarget?.toString() || "");
+      setDailyFatTarget(profile.dailyFatTarget?.toString() || "");
+      // Load goal data
+      setGoalWeightKg(profile.goalWeightKg?.toString() || "");
+      if (profile.goalDate) {
+        const date = new Date(profile.goalDate);
+        setGoalDate(date.toISOString().split('T')[0]);
+      }
     }
   }, [profile]);
 
@@ -133,11 +148,29 @@ export function Profile() {
         weightKgValue = weightKgValue / 2.20462;
       }
 
+      // Convert goal weight if needed
+      let goalWeightValue = goalWeightKg ? parseFloat(goalWeightKg) : undefined;
+      if (goalWeightValue && weightUnit === "lbs") {
+        goalWeightValue = goalWeightValue / 2.20462;
+      }
+
+      // Convert goal date to timestamp
+      let goalDateTimestamp = undefined;
+      if (goalDate) {
+        goalDateTimestamp = new Date(goalDate).getTime();
+      }
+
       await updateProfile.mutateAsync({
         heightCm: heightCmValue,
         weightKg: weightKgValue,
         ageYears: formData.ageYears ? parseInt(formData.ageYears) : undefined,
         fitnessGoal: (formData.fitnessGoal as "lose_fat" | "build_muscle" | "maintain") || undefined,
+        goalWeightKg: goalWeightValue,
+        goalDate: goalDateTimestamp,
+        dailyCalorieTarget: dailyCalorieTarget ? parseInt(dailyCalorieTarget) : undefined,
+        dailyProteinTarget: dailyProteinTarget ? parseInt(dailyProteinTarget) : undefined,
+        dailyCarbsTarget: dailyCarbsTarget ? parseInt(dailyCarbsTarget) : undefined,
+        dailyFatTarget: dailyFatTarget ? parseInt(dailyFatTarget) : undefined,
       });
 
       toast.success("Profile updated successfully");
@@ -214,6 +247,11 @@ export function Profile() {
         dailyCarbs,
         dailyFat,
       });
+      // Auto-update the target fields with calculated values
+      setDailyCalorieTarget(dailyCalories.toString());
+      setDailyProteinTarget(dailyProtein.toString());
+      setDailyCarbsTarget(dailyCarbs.toString());
+      setDailyFatTarget(dailyFat.toString());
     }
   }, [formData.heightCm, formData.weightKg, formData.ageYears, formData.fitnessGoal]);
 
@@ -400,7 +438,7 @@ export function Profile() {
                       <span>Daily Targets for {getGoalLabel(formData.fitnessGoal)}</span>
                     </p>
                     {dailyTargets && (
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                         <div className="bg-slate-800 p-3 rounded">
                           <p className="text-slate-400 text-xs">Calories</p>
                           <p className="text-cyan-400 text-lg font-bold">{dailyTargets.dailyCalories}</p>
@@ -419,6 +457,61 @@ export function Profile() {
                         </div>
                       </div>
                     )}
+                    <p className="text-slate-400 text-xs mb-3">Customize your daily targets (optional):</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div>
+                        <Label htmlFor="dailyCalorieTarget" className="text-slate-300 text-xs">
+                          Calories
+                        </Label>
+                        <Input
+                          id="dailyCalorieTarget"
+                          type="number"
+                          placeholder="2000"
+                          value={dailyCalorieTarget}
+                          onChange={(e) => setDailyCalorieTarget(e.target.value)}
+                          className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="dailyProteinTarget" className="text-slate-300 text-xs">
+                          Protein (g)
+                        </Label>
+                        <Input
+                          id="dailyProteinTarget"
+                          type="number"
+                          placeholder="150"
+                          value={dailyProteinTarget}
+                          onChange={(e) => setDailyProteinTarget(e.target.value)}
+                          className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="dailyCarbsTarget" className="text-slate-300 text-xs">
+                          Carbs (g)
+                        </Label>
+                        <Input
+                          id="dailyCarbsTarget"
+                          type="number"
+                          placeholder="200"
+                          value={dailyCarbsTarget}
+                          onChange={(e) => setDailyCarbsTarget(e.target.value)}
+                          className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="dailyFatTarget" className="text-slate-300 text-xs">
+                          Fat (g)
+                        </Label>
+                        <Input
+                          id="dailyFatTarget"
+                          type="number"
+                          placeholder="65"
+                          value={dailyFatTarget}
+                          onChange={(e) => setDailyFatTarget(e.target.value)}
+                          className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
+                        />
+                      </div>
+                    </div>
                   </div>
 
                   <div className="p-3 rounded-lg bg-slate-900 border border-white/10">

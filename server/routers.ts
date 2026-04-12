@@ -184,6 +184,12 @@ export const appRouter = router({
           weightKg: z.number().positive().optional(),
           ageYears: z.number().int().min(1).max(150).optional(),
           fitnessGoal: z.enum(["lose_fat", "build_muscle", "maintain"]).optional(),
+          goalWeightKg: z.number().positive().optional(),
+          goalDate: z.number().optional(),
+          dailyCalorieTarget: z.number().int().positive().optional(),
+          dailyProteinTarget: z.number().int().positive().optional(),
+          dailyCarbsTarget: z.number().int().positive().optional(),
+          dailyFatTarget: z.number().int().positive().optional(),
         })
       )
       .mutation(({ ctx, input }) => upsertUserProfile(ctx.user.id, input)),

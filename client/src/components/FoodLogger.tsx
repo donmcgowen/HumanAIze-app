@@ -832,14 +832,14 @@ export function FoodLogger() {
       <FoodInsights
         insights={insights || null}
         isLoading={insightsLoading}
-        dailyCalorieGoal={2000}
+        dailyCalorieGoal={userProfile?.dailyCalorieTarget || 2000}
         currentCalories={dailyTotals.calories}
         currentProtein={dailyTotals.protein}
-        dailyProteinGoal={150}
+        dailyProteinGoal={userProfile?.dailyProteinTarget || 150}
         currentCarbs={dailyTotals.carbs}
-        dailyCarbGoal={200}
+        dailyCarbGoal={userProfile?.dailyCarbsTarget || 200}
         currentFat={dailyTotals.fat}
-        dailyFatGoal={65}
+        dailyFatGoal={userProfile?.dailyFatTarget || 65}
       />
     </div>
   );
