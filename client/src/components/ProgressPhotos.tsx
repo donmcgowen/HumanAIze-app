@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Camera, Upload, Trash2, Calendar, Loader2 } from "lucide-react";
+import { Camera, Upload, Trash2, Calendar, Loader2, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import type { ProgressPhoto } from "@shared/types";
 
@@ -19,9 +19,10 @@ export function ProgressPhotos() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<any>(null);
 
   const utils = trpc.useUtils();
-  const { data: photos, isLoading } = trpc.progressPhotos.getPhotos.useQuery();
+  const { data: photos, isLoading, error } = trpc.progressPhotos.getPhotos.useQuery();
   const uploadMutation = trpc.progressPhotos.uploadPhoto.useMutation();
   const deleteMutation = trpc.progressPhotos.deletePhoto.useMutation();
 
@@ -117,6 +118,7 @@ export function ProgressPhotos() {
     try {
       await deleteMutation.mutateAsync({ photoId });
       toast.success("Photo deleted");
+      setSelectedPhoto(null);
       utils.progressPhotos.getPhotos.invalidate();
     } catch (error) {
       console.error("Error deleting photo:", error);
@@ -134,28 +136,49 @@ export function ProgressPhotos() {
         </Button>
       </div>
 
-      {isLoading ? (
+      {error ? (
+        <Card className="border-red-700 bg-red-900/20">
+          <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+            <p className="text-sm text-red-400">Failed to load progress photos</p>
+            <p className="text-xs text-red-300 mt-1">Please try refreshing the page</p>
+          </CardContent>
+        </Card>
+      ) : isLoading ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
         </div>
       ) : photos && photos.length > 0 ? (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
           {photos.map((photo: typeof photos[0]) => (
-            <div key={photo.id} className="group relative overflow-hidden rounded-lg bg-slate-800">
+            <div
+              key={photo.id}
+              className="group relative overflow-hidden rounded-lg bg-slate-800 cursor-pointer transition-transform hover:scale-105"
+              onClick={() => setSelectedPhoto(photo)}
+            >
+              {/* Photo thumbnail */}
               <img
                 src={photo.photoUrl}
                 alt={photo.photoName}
                 className="aspect-square w-full object-cover"
               />
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 opacity-0 transition-opacity group-hover:opacity-100">
-                <p className="text-center text-sm font-medium text-white">{photo.photoName}</p>
+              
+              {/* Photo name overlay at top */}
+              <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-2">
+                <p className="text-xs font-medium text-white truncate">{photo.photoName}</p>
                 <p className="text-xs text-slate-300">
                   {new Date(photo.photoDate).toLocaleDateString()}
                 </p>
+              </div>
+
+              {/* Hover overlay with delete option */}
+              <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/70 opacity-0 transition-opacity group-hover:opacity-100">
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => deletePhoto(photo.id)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deletePhoto(photo.id);
+                  }}
                   className="gap-1"
                 >
                   <Trash2 className="h-3 w-3" />
@@ -174,6 +197,40 @@ export function ProgressPhotos() {
           </CardContent>
         </Card>
       )}
+
+      {/* Full Image Modal */}
+      <Dialog open={!!selectedPhoto} onOpenChange={(open) => !open && setSelectedPhoto(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selectedPhoto?.photoName}</DialogTitle>
+          </DialogHeader>
+          {selectedPhoto && (
+            <div className="space-y-4">
+              <div className="relative overflow-hidden rounded-lg bg-black">
+                <img
+                  src={selectedPhoto.photoUrl}
+                  alt={selectedPhoto.photoName}
+                  className="w-full h-auto max-h-96 object-contain"
+                />
+              </div>
+              <div className="space-y-2 text-sm text-slate-400">
+                <p><strong>Date:</strong> {new Date(selectedPhoto.photoDate).toLocaleDateString()}</p>
+                {selectedPhoto.description && (
+                  <p><strong>Description:</strong> {selectedPhoto.description}</p>
+                )}
+              </div>
+              <Button
+                variant="destructive"
+                onClick={() => deletePhoto(selectedPhoto.id)}
+                className="w-full gap-2"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete Photo
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Add Photo Modal */}
       <Dialog open={showAddModal} onOpenChange={setShowAddModal}>

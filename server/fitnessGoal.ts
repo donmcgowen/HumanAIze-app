@@ -1,6 +1,7 @@
 /**
  * Fitness goal calorie and macro calculations
  * Uses Mifflin-St Jeor formula for TDEE calculation
+ * Adjusts macros based on weight loss goal and timeline
  */
 
 export type FitnessGoal = "lose_fat" | "build_muscle" | "maintain";
@@ -10,6 +11,27 @@ export interface MacroTargets {
   dailyProtein: number;
   dailyCarbs: number;
   dailyFat: number;
+}
+
+/**
+ * Convert lbs to kg
+ */
+function lbsToKg(lbs: number): number {
+  return lbs * 0.453592;
+}
+
+/**
+ * Convert kg to lbs
+ */
+function kgToLbs(kg: number): number {
+  return kg / 0.453592;
+}
+
+/**
+ * Convert inches to cm
+ */
+function inchesToCm(inches: number): number {
+  return inches * 2.54;
 }
 
 /**
@@ -36,21 +58,82 @@ export function calculateTDEE(
 }
 
 /**
+ * Calculate daily calorie deficit needed to reach goal weight by target date
+ * Returns the adjusted daily calories for the goal
+ */
+export function calculateGoalAdjustedCalories(
+  currentWeightLbs: number,
+  goalWeightLbs: number,
+  targetDateMs: number,
+  tdee: number
+): number {
+  const now = Date.now();
+  
+  // If goal date is in the past, use standard 20% deficit
+  if (targetDateMs <= now) {
+    return Math.round(tdee * 0.8);
+  }
+
+  // Calculate weight to lose (in lbs)
+  const weightToLose = currentWeightLbs - goalWeightLbs;
+  
+  // If already at goal or above, use standard deficit
+  if (weightToLose <= 0) {
+    return Math.round(tdee * 0.8);
+  }
+
+  // Calculate days to goal
+  const daysToGoal = Math.max(1, (targetDateMs - now) / (24 * 60 * 60 * 1000));
+  
+  // Calculate daily calorie deficit needed
+  // 1 lb of fat = 3500 calories
+  // Daily deficit = (total calories to lose) / days
+  const totalCaloriesToLose = weightToLose * 3500;
+  const dailyDeficitNeeded = totalCaloriesToLose / daysToGoal;
+  
+  // Calculate adjusted daily calories
+  const adjustedDailyCalories = tdee - dailyDeficitNeeded;
+  
+  // Cap the deficit at 1000 calories per day (max safe deficit)
+  // and minimum of 1200 calories per day
+  const minCalories = 1200;
+  const maxDailyDeficit = 1000;
+  const minDailyCalories = Math.max(minCalories, tdee - maxDailyDeficit);
+  
+  return Math.round(Math.max(minDailyCalories, adjustedDailyCalories));
+}
+
+/**
  * Calculate daily macro targets based on fitness goal
+ * For fat loss, adjusts based on goal weight and timeline
  */
 export function calculateMacroTargets(
   tdee: number,
   weightKg: number,
-  goal: FitnessGoal
+  goal: FitnessGoal,
+  currentWeightLbs?: number,
+  goalWeightLbs?: number,
+  targetDateMs?: number
 ): MacroTargets {
   let dailyCalories: number;
   let proteinMultiplier: number;
   let fatMultiplier: number;
 
   if (goal === "lose_fat") {
-    // 20% calorie deficit for fat loss
-    dailyCalories = Math.round(tdee * 0.8);
-    // High protein: 1.8-2.2g per kg
+    // If goal weight and date are provided, calculate adjusted calories
+    if (currentWeightLbs && goalWeightLbs && targetDateMs) {
+      dailyCalories = calculateGoalAdjustedCalories(
+        currentWeightLbs,
+        goalWeightLbs,
+        targetDateMs,
+        tdee
+      );
+    } else {
+      // Fallback to standard 20% deficit
+      dailyCalories = Math.round(tdee * 0.8);
+    }
+    
+    // High protein: 1.8-2.2g per kg (preserve muscle during fat loss)
     proteinMultiplier = 2.0;
     // Lower fat: 0.8-1.0g per kg
     fatMultiplier = 0.9;

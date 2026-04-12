@@ -12,6 +12,8 @@ export interface MacroCalculatorInput {
   ageYears: number;
   fitnessGoal: FitnessGoal;
   activityLevel: ActivityLevel;
+  goalWeightKg?: number;
+  targetDateMs?: number;
 }
 
 export interface MacroSuggestion {
@@ -58,10 +60,56 @@ function calculateTDEE(bmr: number, activityLevel: ActivityLevel): number {
 }
 
 /**
+ * Calculate daily calorie deficit needed to reach goal weight by target date
+ * Returns the adjusted daily calories for the goal
+ */
+function calculateGoalAdjustedCalories(
+  currentWeightKg: number,
+  goalWeightKg: number,
+  targetDateMs: number,
+  tdee: number
+): number {
+  const now = Date.now();
+  
+  // If goal date is in the past, use standard 20% deficit
+  if (targetDateMs <= now) {
+    return Math.round(tdee * 0.8);
+  }
+
+  // Calculate weight to lose (in kg)
+  const weightToLose = currentWeightKg - goalWeightKg;
+  
+  // If already at goal or above, use standard deficit
+  if (weightToLose <= 0) {
+    return Math.round(tdee * 0.8);
+  }
+
+  // Calculate days to goal
+  const daysToGoal = Math.max(1, (targetDateMs - now) / (24 * 60 * 60 * 1000));
+  
+  // Calculate daily calorie deficit needed
+  // 1 kg of fat = 7700 calories
+  // Daily deficit = (total calories to lose) / days
+  const totalCaloriesToLose = weightToLose * 7700;
+  const dailyDeficitNeeded = totalCaloriesToLose / daysToGoal;
+  
+  // Calculate adjusted daily calories
+  const adjustedDailyCalories = tdee - dailyDeficitNeeded;
+  
+  // Cap the deficit at 1000 calories per day (max safe deficit)
+  // and minimum of 1200 calories per day
+  const minCalories = 1200;
+  const maxDailyDeficit = 1000;
+  const minDailyCalories = Math.max(minCalories, tdee - maxDailyDeficit);
+  
+  return Math.round(Math.max(minDailyCalories, adjustedDailyCalories));
+}
+
+/**
  * Calculate macro recommendations based on fitness goal
  */
 export function calculateMacros(input: MacroCalculatorInput): MacroSuggestion {
-  const { weightKg, heightCm, ageYears, fitnessGoal, activityLevel } = input;
+  const { weightKg, heightCm, ageYears, fitnessGoal, activityLevel, goalWeightKg, targetDateMs } = input;
 
   // Calculate BMR and TDEE
   const bmr = calculateBMR(weightKg, heightCm, ageYears);
@@ -75,8 +123,13 @@ export function calculateMacros(input: MacroCalculatorInput): MacroSuggestion {
 
   switch (fitnessGoal) {
     case "lose_fat":
-      // 15-20% caloric deficit
-      dailyCalories = Math.round(tdee * 0.8);
+      // If goal weight and date are provided, calculate adjusted calories
+      if (goalWeightKg && targetDateMs) {
+        dailyCalories = calculateGoalAdjustedCalories(weightKg, goalWeightKg, targetDateMs, tdee);
+      } else {
+        // Fallback to standard 20% deficit
+        dailyCalories = Math.round(tdee * 0.8);
+      }
       proteinMultiplier = 2.2; // Higher protein to preserve muscle
       carbsPercentage = 0.35;
       fatPercentage = 0.25;

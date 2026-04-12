@@ -534,12 +534,12 @@ export async function getGoalProgress(userId: number): Promise<GoalProgress | nu
   }
 
   const profile = await getUserProfile(userId);
-  if (!profile || !profile.goalWeightKg || !profile.goalDate || !profile.weightKg) {
+  if (!profile || !profile.goalWeightLbs || !profile.goalDate || !profile.weightLbs) {
     return null;
   }
 
-  const currentWeight = profile.weightKg;
-  const goalWeight = profile.goalWeightKg;
+  const currentWeight = profile.weightLbs;
+  const goalWeight = profile.goalWeightLbs;
   const now = new Date();
   
   // Handle goalDate which is stored as a number (timestamp in milliseconds)
@@ -609,7 +609,7 @@ export async function getWeightHistory(userId: number, days: number = 90): Promi
   }
 
   const profile = await getUserProfile(userId);
-  if (!profile || !profile.weightKg) {
+  if (!profile || !profile.weightLbs) {
     return [];
   }
 
@@ -621,11 +621,11 @@ export async function getWeightHistory(userId: number, days: number = 90): Promi
   return [
     {
       date: startDate.toISOString().split('T')[0],
-      weight: profile.weightKg,
+      weight: profile.weightLbs,
     },
     {
       date: now.toISOString().split('T')[0],
-      weight: profile.weightKg,
+      weight: profile.weightLbs,
     },
   ];
 }
@@ -719,7 +719,12 @@ export async function getProgressPhotos(userId: number): Promise<ProgressPhoto[]
     return [];
   }
 
-  return db.select().from(progressPhotos).where(eq(progressPhotos.userId, userId)).orderBy((t) => desc(t.photoDate));
+  try {
+    return await db.select().from(progressPhotos).where(eq(progressPhotos.userId, userId)).orderBy((t) => desc(t.photoDate));
+  } catch (error) {
+    console.error("[Database] Error fetching progress photos:", error);
+    return [];
+  }
 }
 
 export async function deleteProgressPhoto(photoId: number, userId: number): Promise<boolean> {

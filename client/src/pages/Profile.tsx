@@ -16,16 +16,16 @@ export function Profile() {
   const updateProfile = trpc.profile.upsert.useMutation();
 
   const [formData, setFormData] = useState({
-    heightCm: "0",
-    weightKg: "0",
+    heightIn: "0",
+    weightLbs: "0",
     ageYears: "0",
     fitnessGoal: "",
+    goalWeightLbs: "0",
+    goalDate: "",
   });
 
   const [bmi, setBmi] = useState<number | null>(null);
   const [bmiCategory, setBmiCategory] = useState<string>("");
-  const [weightUnit, setWeightUnit] = useState<"kg" | "lbs">("lbs");
-  const [heightUnit, setHeightUnit] = useState<"cm" | "in">("in");
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>("moderately_active");
   
   // Maintenance calories state
@@ -33,7 +33,7 @@ export function Profile() {
   const [customMaintenanceCalories, setCustomMaintenanceCalories] = useState<string>("");
   
   // Goal-based targets state
-  const [goalWeightKg, setGoalWeightKg] = useState<string>("");
+  const [goalWeightLbs, setGoalWeightLbs] = useState<string>("");
   const [goalDate, setGoalDate] = useState<string>("");
   const [goalTargets, setGoalTargets] = useState<MacroSuggestion | null>(null);
   
@@ -43,41 +43,22 @@ export function Profile() {
   const [dailyCarbsTarget, setDailyCarbsTarget] = useState<string>("");
   const [dailyFatTarget, setDailyFatTarget] = useState<string>("");
 
-  // Unit conversion helpers
-  const convertWeight = (kg: number, toUnit: "kg" | "lbs") => {
-    return toUnit === "lbs" ? Math.round(kg * 2.20462 * 10) / 10 : kg;
-  };
-
-  const convertHeight = (cm: number, toUnit: "cm" | "in") => {
-    return toUnit === "in" ? Math.round(cm / 2.54 * 10) / 10 : cm;
-  };
-
-  const displayWeight = () => {
-    const kg = parseFloat(formData.weightKg);
-    if (isNaN(kg) || kg <= 0) return "0";
-    return convertWeight(kg, weightUnit).toString();
-  };
-
-  const displayHeight = () => {
-    const cm = parseFloat(formData.heightCm);
-    if (isNaN(cm) || cm <= 0) return "0";
-    return convertHeight(cm, heightUnit).toString();
-  };
-
   // Load profile data into form
   useEffect(() => {
     if (profile) {
       setFormData({
-        heightCm: profile.heightCm ? profile.heightCm.toString() : "0",
-        weightKg: profile.weightKg ? profile.weightKg.toString() : "0",
+        heightIn: profile.heightIn ? profile.heightIn.toString() : "0",
+        weightLbs: profile.weightLbs ? profile.weightLbs.toString() : "0",
         ageYears: profile.ageYears ? profile.ageYears.toString() : "0",
+        goalWeightLbs: profile.goalWeightLbs ? profile.goalWeightLbs.toString() : "0",
+        goalDate: profile.goalDate ? new Date(profile.goalDate).toISOString().split('T')[0] : "",
         fitnessGoal: profile.fitnessGoal || "",
       });
       setDailyCalorieTarget(profile.dailyCalorieTarget ? profile.dailyCalorieTarget.toString() : "0");
       setDailyProteinTarget(profile.dailyProteinTarget ? profile.dailyProteinTarget.toString() : "0");
       setDailyCarbsTarget(profile.dailyCarbsTarget ? profile.dailyCarbsTarget.toString() : "0");
       setDailyFatTarget(profile.dailyFatTarget ? profile.dailyFatTarget.toString() : "0");
-      setGoalWeightKg(profile.goalWeightKg ? profile.goalWeightKg.toString() : "");
+      setGoalWeightLbs(profile.goalWeightLbs ? profile.goalWeightLbs.toString() : "");
       if (profile.goalDate) {
         const date = new Date(profile.goalDate);
         setGoalDate(date.toISOString().split('T')[0]);
@@ -85,29 +66,14 @@ export function Profile() {
     }
   }, [profile]);
 
-  // Calculate BMI whenever height or weight changes
+  // Calculate BMI whenever height or weight changes (using imperial formula)
   useEffect(() => {
-    const heightInput = parseFloat(formData.heightCm);
-    const weightInput = parseFloat(formData.weightKg);
+    const heightInput = parseFloat(formData.heightIn);
+    const weightInput = parseFloat(formData.weightLbs);
 
     if (heightInput > 0 && weightInput > 0) {
-      let calculatedBmi: number;
-      
-      if (heightUnit === "in" && weightUnit === "lbs") {
-        calculatedBmi = (weightInput / (heightInput * heightInput)) * 703;
-      } else if (heightUnit === "cm" && weightUnit === "kg") {
-        const heightM = heightInput / 100;
-        calculatedBmi = weightInput / (heightM * heightM);
-      } else {
-        // Mixed units - convert to metric first
-        let heightCm = heightInput;
-        let weightKg = weightInput;
-        if (heightUnit === "in") heightCm = heightInput * 2.54;
-        if (weightUnit === "lbs") weightKg = weightInput / 2.20462;
-        const heightM = heightCm / 100;
-        calculatedBmi = weightKg / (heightM * heightM);
-      }
-
+      // BMI formula for imperial units: (weight in lbs / (height in inches)^2) * 703
+      const calculatedBmi = (weightInput / (heightInput * heightInput)) * 703;
       const roundedBmi = Math.round(calculatedBmi * 10) / 10;
       setBmi(roundedBmi);
 
@@ -119,494 +85,367 @@ export function Profile() {
       setBmi(null);
       setBmiCategory("");
     }
-  }, [formData.heightCm, formData.weightKg, heightUnit, weightUnit]);
+  }, [formData.heightIn, formData.weightLbs]);
 
   // Calculate maintenance calories whenever biometric data or activity level changes
   useEffect(() => {
-    const heightInput = parseFloat(formData.heightCm);
-    const weightInput = parseFloat(formData.weightKg);
+    const heightInput = parseFloat(formData.heightIn);
+    const weightInput = parseFloat(formData.weightLbs);
     const ageInput = parseInt(formData.ageYears);
 
     if (heightInput > 0 && weightInput > 0 && ageInput > 0) {
       try {
+        // Convert imperial to metric for calculation
+        const heightCm = heightInput * 2.54;
+        const weightKg = weightInput / 2.20462;
+        
         const maintenance = calculateMacros({
-          heightCm: heightInput,
-          weightKg: weightInput,
+          heightCm,
+          weightKg,
           ageYears: ageInput,
-          fitnessGoal: "maintain",
           activityLevel,
+          fitnessGoal: 'maintain',
         });
         setMaintenanceCalories(maintenance);
-        setCustomMaintenanceCalories(maintenance.dailyCalories.toString());
       } catch (error) {
         console.error("Error calculating maintenance calories:", error);
       }
     }
-  }, [formData.heightCm, formData.weightKg, formData.ageYears, activityLevel]);
+  }, [formData.heightIn, formData.weightLbs, formData.ageYears, activityLevel]);
 
-  // Calculate goal-based targets when goal is selected
+  // Calculate goal-based targets
   useEffect(() => {
-    if (formData.fitnessGoal && formData.fitnessGoal !== "maintain") {
-      const heightInput = parseFloat(formData.heightCm);
-      const weightInput = parseFloat(formData.weightKg);
-      const ageInput = parseInt(formData.ageYears);
+    const heightInput = parseFloat(formData.heightIn);
+    const weightInput = parseFloat(formData.weightLbs);
+    const ageInput = parseInt(formData.ageYears);
+        const goalWeight = parseFloat(formData.goalWeightLbs);
 
-      if (heightInput > 0 && weightInput > 0 && ageInput > 0) {
-        try {
-          const targets = calculateMacros({
-            heightCm: heightInput,
-            weightKg: weightInput,
-            ageYears: ageInput,
-            fitnessGoal: formData.fitnessGoal as "lose_fat" | "build_muscle",
-            activityLevel,
-          });
-          setGoalTargets(targets);
-          // Auto-populate daily targets with calculated values
-          setDailyCalorieTarget(targets.dailyCalories.toString());
-          setDailyProteinTarget(targets.dailyProtein.toString());
-          setDailyCarbsTarget(targets.dailyCarbs.toString());
-          setDailyFatTarget(targets.dailyFat.toString());
-        } catch (error) {
-          console.error("Error calculating goal targets:", error);
-        }
+    if (heightInput > 0 && weightInput > 0 && ageInput > 0 && goalWeight > 0 && formData.fitnessGoal) {
+      try {
+        // Convert imperial to metric for calculation
+        const heightCm = heightInput * 2.54;
+        const weightKg = weightInput / 2.20462;
+        const goalWeightKg = goalWeight / 2.20462;
+        
+        const targets = calculateMacros({
+          heightCm,
+          weightKg,
+          ageYears: ageInput,
+          activityLevel,
+          fitnessGoal: formData.fitnessGoal as 'lose_fat' | 'build_muscle' | 'maintain',
+          goalWeightKg: formData.fitnessGoal === 'lose_fat' ? goalWeightKg : undefined,
+          targetDateMs: formData.fitnessGoal === 'lose_fat' && formData.goalDate ? new Date(formData.goalDate + 'T00:00:00').getTime() : undefined,
+        });
+        setGoalTargets(targets);
+      } catch (error) {
+        console.error("Error calculating goal targets:", error);
       }
-    } else {
-      setGoalTargets(null);
     }
-  }, [formData.fitnessGoal, formData.heightCm, formData.weightKg, formData.ageYears, activityLevel]);
+  }, [formData.heightIn, formData.weightLbs, formData.ageYears, formData.goalWeightLbs, formData.goalDate, formData.fitnessGoal, activityLevel]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({
+    
+    // Only allow whole numbers (no decimals)
+    const numValue = value.replace(/[^\d]/g, '');
+    
+    setFormData(prev => ({
       ...prev,
-      [name]: value,
+      [name]: numValue,
     }));
   };
 
-  const handleGoalChange = (value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      fitnessGoal: value,
-    }));
-  };
+  const handleSave = async () => {
+    const heightInput = parseInt(formData.heightIn);
+    const weightInput = parseInt(formData.weightLbs);
+    const ageInput = parseInt(formData.ageYears);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+    if (heightInput <= 0 || weightInput <= 0 || ageInput <= 0) {
+      toast.error("Please enter valid height, weight, and age");
+      return;
+    }
 
     try {
-      let heightCmValue = formData.heightCm ? parseFloat(formData.heightCm) : undefined;
-      let weightKgValue = formData.weightKg ? parseFloat(formData.weightKg) : undefined;
-      
-      if (heightCmValue && heightUnit === "in") {
-        heightCmValue = heightCmValue * 2.54;
-      }
-      if (weightKgValue && weightUnit === "lbs") {
-        weightKgValue = weightKgValue / 2.20462;
-      }
-
-      let goalWeightValue = goalWeightKg ? parseFloat(goalWeightKg) : undefined;
-      if (goalWeightValue && weightUnit === "lbs") {
-        goalWeightValue = goalWeightValue / 2.20462;
-      }
-
-      let goalDateTimestamp = undefined;
-      if (goalDate) {
-        goalDateTimestamp = new Date(goalDate).getTime();
-      }
+      const goalWeightVal = goalWeightLbs ? parseInt(goalWeightLbs) : undefined;
+      const goalDateVal = goalDate ? new Date(goalDate).getTime() : undefined;
 
       await updateProfile.mutateAsync({
-        heightCm: heightCmValue && heightCmValue > 0 ? heightCmValue : undefined,
-        weightKg: weightKgValue && weightKgValue > 0 ? weightKgValue : undefined,
-        ageYears: formData.ageYears && parseInt(formData.ageYears) > 0 ? parseInt(formData.ageYears) : undefined,
-        fitnessGoal: (formData.fitnessGoal as "lose_fat" | "build_muscle" | "maintain") || undefined,
-        goalWeightKg: goalWeightValue && goalWeightValue > 0 ? goalWeightValue : undefined,
-        goalDate: goalDateTimestamp,
-        dailyCalorieTarget: dailyCalorieTarget && parseInt(dailyCalorieTarget) > 0 ? parseInt(dailyCalorieTarget) : undefined,
-        dailyProteinTarget: dailyProteinTarget && parseInt(dailyProteinTarget) > 0 ? parseInt(dailyProteinTarget) : undefined,
-        dailyCarbsTarget: dailyCarbsTarget && parseInt(dailyCarbsTarget) > 0 ? parseInt(dailyCarbsTarget) : undefined,
-        dailyFatTarget: dailyFatTarget && parseInt(dailyFatTarget) > 0 ? parseInt(dailyFatTarget) : undefined,
+        heightIn: heightInput,
+        weightLbs: weightInput,
+        ageYears: ageInput,
+        fitnessGoal: (formData.fitnessGoal || undefined) as 'lose_fat' | 'build_muscle' | 'maintain' | undefined,
+        goalWeightLbs: goalWeightVal,
+        goalDate: goalDateVal,
+        dailyCalorieTarget: dailyCalorieTarget ? parseInt(dailyCalorieTarget) : undefined,
+        dailyProteinTarget: dailyProteinTarget ? parseInt(dailyProteinTarget) : undefined,
+        dailyCarbsTarget: dailyCarbsTarget ? parseInt(dailyCarbsTarget) : undefined,
+        dailyFatTarget: dailyFatTarget ? parseInt(dailyFatTarget) : undefined,
       });
 
-      toast.success("Profile updated successfully");
+      toast.success("Profile saved successfully!");
       refetch();
     } catch (error) {
-      toast.error("Failed to update profile");
-      console.error(error);
+      console.error("Error saving profile:", error);
+      toast.error("Failed to save profile");
     }
-  };
-
-  const getBmiColor = () => {
-    if (!bmiCategory) return "text-gray-400";
-    if (bmiCategory === "Underweight") return "text-blue-400";
-    if (bmiCategory === "Normal weight") return "text-green-400";
-    if (bmiCategory === "Overweight") return "text-yellow-400";
-    return "text-red-400";
   };
 
   if (isLoadingProfile) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6 max-w-4xl mx-auto">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-white">User Profile</h1>
+        <h1 className="text-3xl font-bold">User Profile</h1>
         <p className="text-slate-400">Manage your biometric data and fitness goals</p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Biometric Data Card */}
-        <Card className="border border-white/10 bg-slate-950">
+      <Card className="bg-slate-800 border-slate-700">
+        <CardHeader>
+          <CardTitle>Biometric Data</CardTitle>
+          <CardDescription>Enter your height, weight, and age for BMI calculation</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {/* Height */}
+          <div>
+            <Label htmlFor="heightIn" className="text-slate-300">
+              Height (inches)
+            </Label>
+            <Input
+              id="heightIn"
+              name="heightIn"
+              type="number"
+              step="1"
+              min="0"
+              placeholder="70"
+              value={formData.heightIn}
+              onChange={handleInputChange}
+              className="bg-slate-900 border-white/10 text-white placeholder-slate-500 mt-2"
+            />
+          </div>
+
+          {/* Weight */}
+          <div>
+            <Label htmlFor="weightLbs" className="text-slate-300">
+              Weight (lbs)
+            </Label>
+            <Input
+              id="weightLbs"
+              name="weightLbs"
+              type="number"
+              step="1"
+              min="0"
+              placeholder="154"
+              value={formData.weightLbs}
+              onChange={handleInputChange}
+              className="bg-slate-900 border-white/10 text-white placeholder-slate-500 mt-2"
+            />
+          </div>
+
+          {/* Age */}
+          <div>
+            <Label htmlFor="ageYears" className="text-slate-300">
+              Age (years)
+            </Label>
+            <Input
+              id="ageYears"
+              name="ageYears"
+              type="number"
+              step="1"
+              min="0"
+              max="150"
+              placeholder="30"
+              value={formData.ageYears}
+              onChange={handleInputChange}
+              className="bg-slate-900 border-white/10 text-white placeholder-slate-500 mt-2"
+            />
+          </div>
+
+          {/* BMI Display */}
+          <div className="bg-slate-900 border border-white/10 rounded-lg p-4">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-slate-400 text-sm mb-1">Your BMI</p>
+                <p className="text-4xl font-bold text-blue-400">{bmi !== null ? bmi : "0"}</p>
+                <p className="text-slate-400 mt-1">{bmiCategory}</p>
+              </div>
+              <div className="text-right text-sm">
+                <p className="text-slate-400 font-semibold mb-2">BMI Categories:</p>
+                <p className="text-blue-400">Underweight: &lt;18.5</p>
+                <p className="text-green-400">Normal: 18.5-24.9</p>
+                <p className="text-yellow-400">Overweight: 25-29.9</p>
+                <p className="text-red-400">Obese: ≥30</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Activity Level */}
+      <Card className="bg-slate-800 border-slate-700">
+        <CardHeader>
+          <CardTitle>Activity Level</CardTitle>
+          <CardDescription>Select your typical weekly activity level</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Select value={activityLevel} onValueChange={(value) => setActivityLevel(value as ActivityLevel)}>
+            <SelectTrigger className="bg-slate-900 border-white/10 text-white">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-900 border-white/10">
+              <SelectItem value="sedentary">Sedentary (little or no exercise)</SelectItem>
+              <SelectItem value="lightly_active">Lightly Active (1-3 days/week)</SelectItem>
+              <SelectItem value="moderately_active">Moderately Active (3-5 days/week)</SelectItem>
+              <SelectItem value="very_active">Very Active (6-7 days/week)</SelectItem>
+              <SelectItem value="extremely_active">Extremely Active (physical job)</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      {/* Maintenance Calories */}
+      {maintenanceCalories && (
+        <Card className="bg-slate-800 border-slate-700">
           <CardHeader>
-            <CardTitle className="text-white">Biometric Data</CardTitle>
-            <CardDescription>Enter your height, weight, and age for BMI calculation</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Height */}
-            <div>
-              <Label htmlFor="heightCm" className="text-slate-300">
-                Height
-              </Label>
-              <div className="flex gap-2 mt-2">
-              <Input
-                id="heightCm"
-                name="heightCm"
-                type="number"
-                placeholder={heightUnit === "in" ? "5" : "170"}
-                  value={formData.heightCm}
-                  onChange={handleInputChange}
-                  className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
-                />
-                <Select value={heightUnit} onValueChange={(value) => setHeightUnit(value as "cm" | "in")}>
-                  <SelectTrigger className="w-20 bg-slate-900 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-white/10">
-                    <SelectItem value="cm">cm</SelectItem>
-                    <SelectItem value="in">in</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center px-3 bg-slate-900 border border-white/10 rounded text-white">
-                  {displayHeight()} {heightUnit}
-                </div>
-              </div>
-            </div>
-
-            {/* Weight */}
-            <div>
-              <Label htmlFor="weightKg" className="text-slate-300">
-                Weight
-              </Label>
-              <div className="flex gap-2 mt-2">
-              <Input
-                id="weightKg"
-                name="weightKg"
-                type="number"
-                placeholder={weightUnit === "lbs" ? "154" : "70"}
-                  value={formData.weightKg}
-                  onChange={handleInputChange}
-                  className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
-                />
-                <Select value={weightUnit} onValueChange={(value) => setWeightUnit(value as "kg" | "lbs")}>
-                  <SelectTrigger className="w-20 bg-slate-900 border-white/10 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-slate-900 border-white/10">
-                    <SelectItem value="kg">kg</SelectItem>
-                    <SelectItem value="lbs">lbs</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="flex items-center px-3 bg-slate-900 border border-white/10 rounded text-white">
-                  {displayWeight()} {weightUnit}
-                </div>
-              </div>
-            </div>
-
-            {/* Age */}
-            <div>
-              <Label htmlFor="ageYears" className="text-slate-300">
-                Age (years)
-              </Label>
-              <Input
-                id="ageYears"
-                name="ageYears"
-                type="number"
-                placeholder="30"
-                value={formData.ageYears}
-                onChange={handleInputChange}
-                className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
-              />
-            </div>
-
-            {/* BMI Display */}
-            {bmi !== null && (
-              <div className="mt-6 p-4 rounded-lg bg-slate-900 border border-white/10">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-slate-400 text-sm">Your BMI</p>
-                    <p className={`text-3xl font-bold ${getBmiColor()}`}>{bmi}</p>
-                    <p className={`text-sm mt-1 ${getBmiColor()}`}>{bmiCategory}</p>
-                  </div>
-                  <div className="text-right text-slate-400 text-xs">
-                    <p>BMI Categories:</p>
-                    <p className="text-blue-400">Underweight: &lt;18.5</p>
-                    <p className="text-green-400">Normal: 18.5-24.9</p>
-                    <p className="text-yellow-400">Overweight: 25-29.9</p>
-                    <p className="text-red-400">Obese: ≥30</p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Activity Level Card */}
-        <Card className="border border-white/10 bg-slate-950">
-          <CardHeader>
-            <CardTitle className="text-white">Activity Level</CardTitle>
-            <CardDescription>Select your typical weekly activity level</CardDescription>
+            <CardTitle>Maintenance Calories</CardTitle>
+            <CardDescription>Your daily calorie needs at current activity level</CardDescription>
           </CardHeader>
           <CardContent>
-            <Select value={activityLevel} onValueChange={(value) => setActivityLevel(value as ActivityLevel)}>
-              <SelectTrigger className="bg-slate-900 border-white/10 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-slate-900 border-white/10">
-                <SelectItem value="sedentary">
-                  <span className="text-white">Sedentary (little or no exercise)</span>
-                </SelectItem>
-                <SelectItem value="lightly_active">
-                  <span className="text-white">Lightly Active (1-3 days/week)</span>
-                </SelectItem>
-                <SelectItem value="moderately_active">
-                  <span className="text-white">Moderately Active (3-5 days/week)</span>
-                </SelectItem>
-                <SelectItem value="very_active">
-                  <span className="text-white">Very Active (6-7 days/week)</span>
-                </SelectItem>
-                <SelectItem value="extremely_active">
-                  <span className="text-white">Extremely Active (physical job)</span>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-slate-900 p-3 rounded">
+                <p className="text-slate-400 text-sm">Daily Calories</p>
+                <p className="text-2xl font-bold text-blue-400">{maintenanceCalories.dailyCalories}</p>
+              </div>
+              <div className="bg-slate-900 p-3 rounded">
+                <p className="text-slate-400 text-sm">Protein</p>
+                <p className="text-2xl font-bold text-red-400">{maintenanceCalories.dailyProtein}g</p>
+              </div>
+              <div className="bg-slate-900 p-3 rounded">
+                <p className="text-slate-400 text-sm">Carbs</p>
+                <p className="text-2xl font-bold text-yellow-400">{maintenanceCalories.dailyCarbs}g</p>
+              </div>
+              <div className="bg-slate-900 p-3 rounded">
+                <p className="text-slate-400 text-sm">Fat</p>
+                <p className="text-2xl font-bold text-orange-400">{maintenanceCalories.dailyFat}g</p>
+              </div>
+            </div>
           </CardContent>
         </Card>
+      )}
 
-        {/* Maintenance Calories Card */}
-        {maintenanceCalories && (
-          <Card className="border border-white/10 bg-slate-950">
-            <CardHeader>
-              <CardTitle className="text-white">Maintenance Calories</CardTitle>
-              <CardDescription>Your daily calorie needs at current activity level</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Daily Calories</p>
-                  <p className="text-2xl font-bold text-cyan-400">{maintenanceCalories.dailyCalories}</p>
-                </div>
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Protein</p>
-                  <p className="text-2xl font-bold text-blue-400">{maintenanceCalories.dailyProtein}g</p>
-                </div>
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Carbs</p>
-                  <p className="text-2xl font-bold text-green-400">{maintenanceCalories.dailyCarbs}g</p>
-                </div>
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Fat</p>
-                  <p className="text-2xl font-bold text-yellow-400">{maintenanceCalories.dailyFat}g</p>
-                </div>
-              </div>
+      {/* Custom Maintenance Calories */}
+      <Card className="bg-slate-800 border-slate-700">
+        <CardHeader>
+          <CardTitle>Customize Maintenance Calories (optional)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Input
+            type="number"
+            placeholder="Enter custom maintenance calories"
+            value={customMaintenanceCalories}
+            onChange={(e) => setCustomMaintenanceCalories(e.target.value)}
+            className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
+          />
+        </CardContent>
+      </Card>
 
-              {/* Customize Maintenance Calories */}
-              <div className="mt-4 p-4 rounded-lg bg-slate-900 border border-white/10">
-                <Label htmlFor="customMaintenance" className="text-slate-300">
-                  Customize Maintenance Calories (optional)
-                </Label>
-                <Input
-                  id="customMaintenance"
-                  type="number"
-                  value={customMaintenanceCalories}
-                  onChange={(e) => setCustomMaintenanceCalories(e.target.value)}
-                  placeholder="Enter custom maintenance calories"
-                  className="mt-2 bg-slate-800 border-white/10 text-white placeholder-slate-500"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        )}
+      {/* Fitness Goal */}
+      <Card className="bg-slate-800 border-slate-700">
+        <CardHeader>
+          <CardTitle>Fitness Goal</CardTitle>
+          <CardDescription>Select your primary fitness objective</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Select value={formData.fitnessGoal} onValueChange={(value) => setFormData(prev => ({ ...prev, fitnessGoal: value }))}>
+            <SelectTrigger className="bg-slate-900 border-white/10 text-white">
+              <SelectValue placeholder="Select your fitness goal" />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-900 border-white/10">
+              <SelectItem value="lose_fat">Lose Fat</SelectItem>
+              <SelectItem value="build_muscle">Build Muscle</SelectItem>
+              <SelectItem value="maintain">Maintain</SelectItem>
+            </SelectContent>
+          </Select>
 
-        {/* Fitness Goal Card */}
-        <Card className="border border-white/10 bg-slate-950">
-          <CardHeader>
-            <CardTitle className="text-white">Fitness Goal</CardTitle>
-            <CardDescription>Select your primary fitness objective</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Select value={formData.fitnessGoal} onValueChange={handleGoalChange}>
-              <SelectTrigger className="bg-slate-900 border-white/10 text-white">
-                <SelectValue placeholder="Select your fitness goal" />
-              </SelectTrigger>
-              <SelectContent className="bg-slate-900 border-white/10">
-                <SelectItem value="lose_fat">
-                  <span className="text-white">Lose Fat</span>
-                </SelectItem>
-                <SelectItem value="build_muscle">
-                  <span className="text-white">Build Muscle</span>
-                </SelectItem>
-                <SelectItem value="maintain">
-                  <span className="text-white">Maintain</span>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </CardContent>
-        </Card>
-
-        {/* Goal-Based Targets Card - Only show if goal is selected */}
-        {formData.fitnessGoal && formData.fitnessGoal !== "maintain" && goalTargets && (
-          <Card className="border border-white/10 bg-slate-950">
-            <CardHeader>
-              <CardTitle className="text-white">
-                Daily Targets for {formData.fitnessGoal === "lose_fat" ? "Lose Fat" : "Build Muscle"}
-              </CardTitle>
-              <CardDescription>Calculated targets to reach your goal</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Goal Weight and Date */}
+          {formData.fitnessGoal && (
+            <>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="goalWeight" className="text-slate-300">
-                    Goal Weight ({weightUnit})
-                  </Label>
+                  <Label htmlFor="goalWeightLbs" className="text-slate-300">Goal Weight (lbs)</Label>
                   <Input
-                    id="goalWeight"
+                    id="goalWeightLbs"
                     type="number"
-                    value={goalWeightKg}
-                    onChange={(e) => setGoalWeightKg(e.target.value)}
-                    placeholder="Enter goal weight"
-                    className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
+                    step="1"
+                    min="0"
+                    placeholder="150"
+                    value={goalWeightLbs}
+                    onChange={(e) => setGoalWeightLbs(e.target.value.replace(/[^\d]/g, ''))}
+                    className="bg-slate-900 border-white/10 text-white placeholder-slate-500 mt-2"
                   />
                 </div>
                 <div>
-                  <Label htmlFor="goalDate" className="text-slate-300">
-                    Target Date
-                  </Label>
+                  <Label htmlFor="goalDate" className="text-slate-300">Target Date</Label>
                   <Input
                     id="goalDate"
                     type="date"
                     value={goalDate}
                     onChange={(e) => setGoalDate(e.target.value)}
-                    className="mt-2 bg-slate-900 border-white/10 text-white placeholder-slate-500"
+                    className="bg-slate-900 border-white/10 text-white mt-2"
                   />
                 </div>
               </div>
 
-              {/* Calculated Targets Display */}
-              <div className="grid grid-cols-2 gap-4 mt-4">
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Daily Calories</p>
-                  <p className="text-2xl font-bold text-cyan-400">{goalTargets.dailyCalories}</p>
+              {goalTargets && (
+                <div className="bg-slate-900 p-4 rounded border border-white/10">
+                  <p className="text-slate-300 font-semibold mb-3">Daily Targets for {formData.fitnessGoal === 'lose_fat' ? 'Fat Loss' : formData.fitnessGoal === 'build_muscle' ? 'Muscle Building' : 'Maintenance'}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <p className="text-slate-400 text-sm">Calories</p>
+                      <p className="text-xl font-bold text-blue-400">{goalTargets.dailyCalories}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Protein</p>
+                      <p className="text-xl font-bold text-red-400">{goalTargets.dailyProtein}g</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Carbs</p>
+                      <p className="text-xl font-bold text-yellow-400">{goalTargets.dailyCarbs}g</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Fat</p>
+                      <p className="text-xl font-bold text-orange-400">{goalTargets.dailyFat}g</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Protein</p>
-                  <p className="text-2xl font-bold text-blue-400">{goalTargets.dailyProtein}g</p>
-                </div>
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Carbs</p>
-                  <p className="text-2xl font-bold text-green-400">{goalTargets.dailyCarbs}g</p>
-                </div>
-                <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
-                  <p className="text-slate-400 text-sm">Fat</p>
-                  <p className="text-2xl font-bold text-yellow-400">{goalTargets.dailyFat}g</p>
-                </div>
-              </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
-              {/* Customize Daily Targets */}
-              <div className="mt-4 p-4 rounded-lg bg-slate-900 border border-white/10">
-                <p className="text-slate-300 font-semibold mb-4">Customize your daily targets (optional):</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="dailyCalories" className="text-slate-300">
-                      Calories
-                    </Label>
-                    <Input
-                      id="dailyCalories"
-                      type="number"
-                      value={dailyCalorieTarget}
-                      onChange={(e) => setDailyCalorieTarget(e.target.value)}
-                      className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="dailyProtein" className="text-slate-300">
-                      Protein (g)
-                    </Label>
-                    <Input
-                      id="dailyProtein"
-                      type="number"
-                      value={dailyProteinTarget}
-                      onChange={(e) => setDailyProteinTarget(e.target.value)}
-                      className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="dailyCarbs" className="text-slate-300">
-                      Carbs (g)
-                    </Label>
-                    <Input
-                      id="dailyCarbs"
-                      type="number"
-                      value={dailyCarbsTarget}
-                      onChange={(e) => setDailyCarbsTarget(e.target.value)}
-                      className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="dailyFat" className="text-slate-300">
-                      Fat (g)
-                    </Label>
-                    <Input
-                      id="dailyFat"
-                      type="number"
-                      value={dailyFatTarget}
-                      onChange={(e) => setDailyFatTarget(e.target.value)}
-                      className="mt-1 bg-slate-800 border-white/10 text-white placeholder-slate-500 text-sm"
-                    />
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+      {/* Progress Photos */}
+      <ProgressPhotos />
+
+      {/* Save Button */}
+      <Button
+        onClick={handleSave}
+        disabled={updateProfile.isPending}
+        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+      >
+        {updateProfile.isPending ? (
+          <>
+            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            Saving...
+          </>
+        ) : (
+          "Save Profile"
         )}
-
-        {/* Progress Photos Section */}
-        <ProgressPhotos />
-
-
-
-        {/* Save Button */}
-        <div className="flex gap-4">
-          <Button
-            type="submit"
-            disabled={updateProfile.isPending}
-            className="bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            {updateProfile.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              "Save Profile"
-            )}
-          </Button>
-        </div>
-      </form>
+      </Button>
     </div>
   );
 }

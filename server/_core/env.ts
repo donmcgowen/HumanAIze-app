@@ -1,7 +1,7 @@
 export const ENV = {
   appId: process.env.VITE_APP_ID ?? "",
   cookieSecret: process.env.JWT_SECRET ?? "",
-  databaseUrl: process.env.DATABASE_URL ?? "",
+  databaseUrl: (process.env.AZURE_SQL_CONNECTION_STRING || process.env.DATABASE_URL) ?? "",
   oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
   ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
   isProduction: process.env.NODE_ENV === "production",
@@ -10,5 +10,6 @@ export const ENV = {
   azureStorageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME ?? "",
   azureStorageContainerName: process.env.AZURE_STORAGE_CONTAINER_NAME ?? "",
   azureStorageAccountKey: process.env.AZURE_STORAGE_ACCOUNT_KEY ?? "",
+  azureSqlConnectionString: process.env.AZURE_SQL_CONNECTION_STRING ?? "",
 };
 
