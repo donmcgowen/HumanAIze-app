@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, lt, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto } from "../drizzle/schema";
+import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto, glucoseReadings, GlucoseReading } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -750,4 +750,98 @@ export async function updateProgressPhoto(
   const updated = await db.select().from(progressPhotos).where(eq(progressPhotos.id, photoId)).limit(1);
   if (!updated || updated.length === 0) throw new Error("Failed to update progress photo");
   return updated[0];
+}
+
+
+// Glucose Readings Functions
+
+export async function addGlucoseReadings(userId: number, sourceId: number, readings: Array<{ readingAt: number; mgdl: number; trend?: string }>) {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available");
+  }
+
+  const values = readings.map(r => ({
+    userId,
+    sourceId,
+    readingAt: r.readingAt,
+    mgdl: r.mgdl,
+    trend: r.trend || null,
+  }));
+
+  await db.insert(glucoseReadings).values(values);
+}
+
+export async function getGlucoseReadingsForDateRange(userId: number, startTime: number, endTime: number): Promise<GlucoseReading[]> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get glucose readings: database not available");
+    return [];
+  }
+
+  return db
+    .select()
+    .from(glucoseReadings)
+    .where(
+      and(
+        eq(glucoseReadings.userId, userId),
+        gte(glucoseReadings.readingAt, startTime),
+        lte(glucoseReadings.readingAt, endTime)
+      )
+    )
+    .orderBy((t) => desc(t.readingAt));
+}
+
+export async function calculateGlucoseStatistics(readings: GlucoseReading[]) {
+  if (readings.length === 0) {
+    return {
+      count: 0,
+      average: 0,
+      min: 0,
+      max: 0,
+      stdDev: 0,
+      timeInRange: 0,
+      timeAboveRange: 0,
+      timeBelowRange: 0,
+      a1cEstimate: 0,
+      timeRange: { start: null, end: null },
+    };
+  }
+
+  const values = readings.map(r => r.mgdl);
+  const average = values.reduce((a, b) => a + b, 0) / values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  // Calculate standard deviation
+  const variance = values.reduce((sum, val) => sum + Math.pow(val - average, 2), 0) / values.length;
+  const stdDev = Math.sqrt(variance);
+
+  // Calculate time in range (80-160 mg/dL)
+  const inRange = values.filter(v => v >= 80 && v <= 160).length;
+  const aboveRange = values.filter(v => v > 160).length;
+  const belowRange = values.filter(v => v < 80).length;
+
+  const timeInRange = (inRange / values.length) * 100;
+  const timeAboveRange = (aboveRange / values.length) * 100;
+  const timeBelowRange = (belowRange / values.length) * 100;
+
+  // Calculate A1C estimate using the formula: A1C = (average glucose + 46.7) / 28.7
+  const a1cEstimate = (average + 46.7) / 28.7;
+
+  return {
+    count: readings.length,
+    average: Math.round(average * 10) / 10,
+    min,
+    max,
+    stdDev: Math.round(stdDev * 10) / 10,
+    timeInRange: Math.round(timeInRange * 10) / 10,
+    timeAboveRange: Math.round(timeAboveRange * 10) / 10,
+    timeBelowRange: Math.round(timeBelowRange * 10) / 10,
+    a1cEstimate: Math.round(a1cEstimate * 100) / 100,
+    timeRange: {
+      start: new Date(readings[readings.length - 1].readingAt).toISOString(),
+      end: new Date(readings[0].readingAt).toISOString(),
+    },
+  };
 }

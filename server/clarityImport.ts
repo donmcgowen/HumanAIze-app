@@ -126,6 +126,11 @@ export function calculateReadingStats(readings: GlucoseReading[]) {
       average: 0,
       min: 0,
       max: 0,
+      stdDev: 0,
+      timeInRange: 0,
+      timeAboveRange: 0,
+      timeBelowRange: 0,
+      a1cEstimate: 0,
       timeRange: { start: null, end: null },
     };
   }
@@ -135,11 +140,29 @@ export function calculateReadingStats(readings: GlucoseReading[]) {
   const min = Math.min(...values);
   const max = Math.max(...values);
 
+  const variance = values.reduce((sum, val) => sum + Math.pow(val - average, 2), 0) / values.length;
+  const stdDev = Math.round(Math.sqrt(variance) * 10) / 10;
+
+  const inRange = values.filter(v => v >= 80 && v <= 160).length;
+  const aboveRange = values.filter(v => v > 160).length;
+  const belowRange = values.filter(v => v < 80).length;
+
+  const timeInRange = Math.round((inRange / values.length) * 1000) / 10;
+  const timeAboveRange = Math.round((aboveRange / values.length) * 1000) / 10;
+  const timeBelowRange = Math.round((belowRange / values.length) * 1000) / 10;
+
+  const a1cEstimate = Math.round(((average + 46.7) / 28.7) * 100) / 100;
+
   return {
     count: readings.length,
     average,
     min,
     max,
+    stdDev,
+    timeInRange,
+    timeAboveRange,
+    timeBelowRange,
+    a1cEstimate,
     timeRange: {
       start: new Date(readings[0].timestamp).toISOString(),
       end: new Date(readings[readings.length - 1].timestamp).toISOString(),

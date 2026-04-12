@@ -23,7 +23,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics } from "./db";
 import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
@@ -209,19 +209,65 @@ export const appRouter = router({
           csvContent: z.string().min(1),
         })
       )
-      .mutation(({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         const validation = validateClarityCSV(input.csvContent);
         if (!validation.valid) {
           throw new Error(validation.error || "Invalid CSV format");
         }
         const result = parseClarityCSV(input.csvContent);
         const stats = calculateReadingStats(result.readings);
+
+        if (result.readings.length > 0) {
+          try {
+            const sources = await getSourcesForUser(ctx.user.id);
+            let source = sources.find(s => s.displayName === "Dexcom Clarity");
+            if (!source) {
+              source = await createCustomSource(ctx.user.id, "Dexcom Clarity", "glucose");
+            }
+
+            if (!source) {
+              throw new Error("Failed to create or find Dexcom Clarity source");
+            }
+
+            const dbReadings = result.readings.map(r => ({
+              readingAt: r.timestamp,
+              mgdl: r.value,
+              trend: r.trend,
+            }));
+
+            await addGlucoseReadings(ctx.user.id, source.id, dbReadings);
+
+            const glucoseReadings = await getGlucoseReadingsForDateRange(
+              ctx.user.id,
+              Math.min(...result.readings.map(r => r.timestamp)),
+              Math.max(...result.readings.map(r => r.timestamp))
+            );
+            const enhancedStats = await calculateGlucoseStatistics(glucoseReadings);
+
+            return {
+              success: true,
+              importedCount: result.importedCount,
+              skippedCount: result.skippedCount,
+              errors: result.errors,
+              statistics: enhancedStats,
+            };
+          } catch (error) {
+            console.error("Error saving glucose readings:", error);
+            return {
+              success: true,
+              importedCount: result.importedCount,
+              skippedCount: result.skippedCount,
+              errors: [...result.errors, `Database save error: ${error instanceof Error ? error.message : "Unknown error"}`],
+              statistics: stats,
+            };
+          }
+        }
+
         return {
           success: true,
           importedCount: result.importedCount,
           skippedCount: result.skippedCount,
           errors: result.errors,
-          readings: result.readings,
           statistics: stats,
         };
       }),
