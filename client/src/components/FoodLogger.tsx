@@ -241,7 +241,8 @@ export function FoodLogger() {
       case "lbs":
         return qty * 453.6;
       case "cup":
-        return qty * 240;
+        // For dry cereals, 1 cup ≈ 30g (not 240g which is for liquids)
+        return qty * 30;
       case "grams":
       default:
         return qty;

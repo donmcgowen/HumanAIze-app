@@ -68,15 +68,26 @@ export async function searchUSDAFoods(query: string): Promise<USDAFoodResult[]> 
       // 1005 = Carbohydrate (g)
       // 1004 = Total lipid (fat) (g)
 
+      const calories = Math.round(getnutrient(1008));
+      const proteinGrams = Math.round(getnutrient(1003) * 10) / 10;
+      const carbsGrams = Math.round(getnutrient(1005) * 10) / 10;
+      const fatGrams = Math.round(getnutrient(1004) * 10) / 10;
+
+      // Data validation: Check for unrealistic macro values per 100g
+      // Most foods should be 0-900 cal per 100g, carbs/protein/fat under 100g each
+      if (calories > 900 || proteinGrams > 100 || carbsGrams > 100 || fatGrams > 100) {
+        console.warn(`[USDA] Anomalous nutrition data for "${food.description}": ${calories}cal, ${proteinGrams}g protein, ${carbsGrams}g carbs, ${fatGrams}g fat`);
+      }
+
       return {
         fdcId: food.fdcId,
         foodName: food.description || "Unknown Food",
         description: food.description || "",
         dataType: food.dataType || "Survey (FNDDS)",
-        calories: Math.round(getnutrient(1008)),
-        proteinGrams: Math.round(getnutrient(1003) * 10) / 10,
-        carbsGrams: Math.round(getnutrient(1005) * 10) / 10,
-        fatGrams: Math.round(getnutrient(1004) * 10) / 10,
+        calories,
+        proteinGrams,
+        carbsGrams,
+        fatGrams,
         servingSize: "100g",
         servingUnit: "g",
       };
@@ -111,15 +122,25 @@ export async function getUSDAFoodDetails(fdcId: string): Promise<USDAFoodResult 
       return nutrient?.value || 0;
     };
 
+    const calories = Math.round(getnutrient(1008));
+    const proteinGrams = Math.round(getnutrient(1003) * 10) / 10;
+    const carbsGrams = Math.round(getnutrient(1005) * 10) / 10;
+    const fatGrams = Math.round(getnutrient(1004) * 10) / 10;
+
+    // Data validation: Check for unrealistic macro values per 100g
+    if (calories > 900 || proteinGrams > 100 || carbsGrams > 100 || fatGrams > 100) {
+      console.warn(`[USDA] Anomalous nutrition data for "${food.description}": ${calories}cal, ${proteinGrams}g protein, ${carbsGrams}g carbs, ${fatGrams}g fat`);
+    }
+
     return {
       fdcId: food.fdcId,
       foodName: food.description || "Unknown Food",
       description: food.description || "",
       dataType: food.dataType || "Survey (FNDDS)",
-      calories: Math.round(getnutrient(1008)),
-      proteinGrams: Math.round(getnutrient(1003) * 10) / 10,
-      carbsGrams: Math.round(getnutrient(1005) * 10) / 10,
-      fatGrams: Math.round(getnutrient(1004) * 10) / 10,
+      calories,
+      proteinGrams,
+      carbsGrams,
+      fatGrams,
       servingSize: "100g",
       servingUnit: "g",
     };

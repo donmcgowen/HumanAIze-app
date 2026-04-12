@@ -715,3 +715,14 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Test meal type selection works correctly
 - [x] Test amount input with unit conversion
 - [x] Verify food is logged with correct meal type and amount
+
+
+## Bug Report - Incorrect Macro Data from USDA (CRITICAL - FIXED)
+
+- [x] Investigate USDA database integration for macro calculation errors
+- [x] Check Cheerios data: showing 893 cal, 175.7g carbs per cup (should be ~100-150 cal, ~20-25g carbs)
+- [x] Verify macro calculation logic for unit conversion
+- [x] Implement data validation to catch anomalies
+- [x] Test with multiple foods to ensure accuracy
+- [x] Fix cup conversion: 1 cup = 30g (not 240g) for dry cereals
+- [x] Write and pass 7 unit tests for macro calculations
