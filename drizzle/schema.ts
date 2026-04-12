@@ -18,10 +18,12 @@ import {
  */
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
-  openId: varchar("openId", { length: 64 }).notNull().unique(),
+  openId: varchar("openId", { length: 64 }).unique(), // Optional for Manus OAuth
+  username: varchar("username", { length: 64 }).unique(), // For custom auth
+  passwordHash: varchar("passwordHash", { length: 255 }), // Bcrypt hash
   name: text("name"),
-  email: varchar("email", { length: 320 }),
-  loginMethod: varchar("loginMethod", { length: 64 }),
+  email: varchar("email", { length: 320 }).unique(),
+  loginMethod: varchar("loginMethod", { length: 64 }), // 'custom' or 'oauth'
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),

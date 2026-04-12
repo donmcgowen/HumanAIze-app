@@ -158,6 +158,78 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+    login: publicProcedure
+      .input(
+        z.object({
+          username: z.string().min(3).max(64),
+          password: z.string().min(6).max(128),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { authenticateUser } = await import("./auth");
+        const { sdk } = await import("./_core/sdk");
+        
+        const result = await authenticateUser(input.username, input.password);
+        if (!result.success) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: result.message,
+          });
+        }
+
+        const sessionToken = await sdk.createSessionToken((result.userId || 0).toString(), {
+          name: result.user?.name || result.user?.username || "",
+          expiresInMs: 365 * 24 * 60 * 60 * 1000,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...cookieOptions,
+          maxAge: 365 * 24 * 60 * 60 * 1000,
+        });
+
+        return {
+          success: true,
+          user: result.user,
+        };
+      }),
+    signup: publicProcedure
+      .input(
+        z.object({
+          username: z.string().min(3).max(64),
+          email: z.string().email(),
+          password: z.string().min(6).max(128),
+          name: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const { createUser } = await import("./auth");
+        const { sdk } = await import("./_core/sdk");
+        
+        const result = await createUser(input.username, input.email, input.password, input.name);
+        if (!result.success) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: result.message,
+          });
+        }
+
+        const sessionToken = await sdk.createSessionToken((result.userId || 0).toString(), {
+          name: input.name || input.username,
+          expiresInMs: 365 * 24 * 60 * 60 * 1000,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, {
+          ...cookieOptions,
+          maxAge: 365 * 24 * 60 * 60 * 1000,
+        });
+
+        return {
+          success: true,
+          message: "Account created successfully",
+        };
+      }),
   }),
   health: router({
     dashboard: protectedProcedure.input(rangeInput).query(({ ctx, input }) => {

@@ -16,11 +16,14 @@ import { Workouts } from "./pages/Workouts";
 import { Monitoring } from "./pages/Monitoring";
 import { Progress } from "./pages/Progress";
 import { Help } from "./pages/Help";
-
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
+      <Route path={"/login"} component={Login} />
+      <Route path={"/signup"} component={Signup} />
+      <Route path={"/ "} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
       <Route path={"/dashboard"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
       <Route path={"/history"} component={() => <DashboardLayout><History /></DashboardLayout>} />
       <Route path={"/sources"} component={() => <DashboardLayout><Sources /></DashboardLayout>} />
