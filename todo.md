@@ -599,3 +599,17 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Integrate calculator into Profile page
 - [x] Test macro calculations for different goal/activity combinations
 - [x] Verify applied macros are saved to database and used in recommendations
+
+
+## Feature - Progress Tracking Dashboard (v1.46 - COMPLETE)
+
+- [x] Create backend query helpers for macro statistics (daily totals, weekly averages, monthly trends)
+- [x] Add tRPC procedures for fetching progress data with date range filtering
+- [x] Create Progress Dashboard page with Recharts line/bar charts
+- [x] Implement weekly/monthly view toggle
+- [x] Add date range picker for custom periods (7/30/90 days)
+- [x] Calculate consistency metrics (% days hit targets, macro adherence rate)
+- [x] Display macro breakdown trends (protein, carbs, fat over time)
+- [x] Add insights panel showing patterns and recommendations
+- [x] Test dashboard with various date ranges
+- [x] Verify charts update when new food logs are added - ready for testing

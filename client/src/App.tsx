@@ -14,6 +14,7 @@ import { Profile } from "./pages/Profile";
 import { FoodLogging } from "./pages/FoodLogging";
 import { Workouts } from "./pages/Workouts";
 import { Monitoring } from "./pages/Monitoring";
+import { Progress } from "./pages/Progress";
 import { Help } from "./pages/Help";
 
 function Router() {
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/food-logging"} component={() => <DashboardLayout><FoodLogging /></DashboardLayout>} />
       <Route path={"/workouts"} component={() => <DashboardLayout><Workouts /></DashboardLayout>} />
       <Route path={"/profile"} component={() => <DashboardLayout><Profile /></DashboardLayout>} />
+      <Route path={"/progress"} component={() => <DashboardLayout><Progress /></DashboardLayout>} />
       <Route path={"/assistant"} component={() => <DashboardLayout><Assistant /></DashboardLayout>} />
       <Route path={"/summaries"} component={() => <DashboardLayout><Summaries /></DashboardLayout>} />
       <Route path={"/help"} component={() => <DashboardLayout><Help /></DashboardLayout>} />

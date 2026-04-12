@@ -22,7 +22,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends } from "./db";
 import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
@@ -436,6 +436,16 @@ export const appRouter = router({
       }
       return migrateCustomAppToConnectApp();
     }),
+  }),
+  progress: router({
+    getTrends: protectedProcedure
+      .input(
+        z.object({
+          startDate: z.number(),
+          endDate: z.number(),
+        })
+      )
+      .query(({ ctx, input }) => getMacroTrends(ctx.user.id, input.startDate, input.endDate)),
   }),
 });
 

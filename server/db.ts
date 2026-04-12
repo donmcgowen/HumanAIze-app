@@ -384,3 +384,186 @@ export async function deleteMealTemplate(mealTemplateId: number, userId: number)
   await db.delete(mealTemplates).where(and(eq(mealTemplates.id, mealTemplateId), eq(mealTemplates.userId, userId)));
   return true;
 }
+
+
+// Progress Tracking Functions
+export interface DailyMacroStats {
+  date: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  calorieTarget?: number;
+  proteinTarget?: number;
+  carbsTarget?: number;
+  fatTarget?: number;
+}
+
+export interface MacroTrend {
+  dailyStats: DailyMacroStats[];
+  weeklyAverages: {
+    week: string;
+    avgCalories: number;
+    avgProtein: number;
+    avgCarbs: number;
+    avgFat: number;
+  }[];
+  monthlyAverages: {
+    month: string;
+    avgCalories: number;
+    avgProtein: number;
+    avgCarbs: number;
+    avgFat: number;
+  }[];
+  consistencyMetrics: {
+    daysTracked: number;
+    daysHitCalorieTarget: number;
+    daysHitProteinTarget: number;
+    daysHitCarbsTarget: number;
+    daysHitFatTarget: number;
+    adherenceRate: number; // percentage
+  };
+}
+
+export async function getMacroTrends(userId: number, startDate: number, endDate: number): Promise<MacroTrend> {
+  const db = await getDb();
+  if (!db) {
+    throw new Error("Database is not available");
+  }
+
+  // Get user profile for targets
+  const profile = await getUserProfile(userId);
+  const calorieTarget = profile?.dailyCalorieTarget || 2000;
+  const proteinTarget = profile?.dailyProteinTarget || 150;
+  const carbsTarget = profile?.dailyCarbsTarget || 200;
+  const fatTarget = profile?.dailyFatTarget || 65;
+
+  // Get all food logs in date range
+  const logs = await db
+    .select()
+    .from(foodLogs)
+    .where(
+      and(
+        eq(foodLogs.userId, userId),
+        gte(foodLogs.loggedAt, startDate),
+        lte(foodLogs.loggedAt, endDate)
+      )
+    )
+    .orderBy(foodLogs.loggedAt);
+
+  // Group by day and calculate totals
+  const dailyMap = new Map<string, DailyMacroStats>();
+
+  logs.forEach((log) => {
+    const date = new Date(log.loggedAt);
+    const dateStr = date.toISOString().split('T')[0];
+
+    if (!dailyMap.has(dateStr)) {
+      dailyMap.set(dateStr, {
+        date: dateStr,
+        calories: 0,
+        protein: 0,
+        carbs: 0,
+        fat: 0,
+        calorieTarget,
+        proteinTarget,
+        carbsTarget,
+        fatTarget,
+      });
+    }
+
+    const daily = dailyMap.get(dateStr)!;
+    daily.calories += log.calories;
+    daily.protein += log.proteinGrams;
+    daily.carbs += log.carbsGrams;
+    daily.fat += log.fatGrams;
+  });
+
+  const dailyStats = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Calculate weekly averages
+  const weeklyMap = new Map<string, { stats: DailyMacroStats[]; week: string }>();
+  dailyStats.forEach((stat) => {
+    const date = new Date(stat.date);
+    const weekStart = new Date(date);
+    weekStart.setDate(date.getDate() - date.getDay());
+    const weekStr = weekStart.toISOString().split('T')[0];
+
+    if (!weeklyMap.has(weekStr)) {
+      weeklyMap.set(weekStr, { stats: [], week: weekStr });
+    }
+    weeklyMap.get(weekStr)!.stats.push(stat);
+  });
+
+  const weeklyAverages = Array.from(weeklyMap.values()).map(({ stats, week }) => ({
+    week,
+    avgCalories: Math.round(stats.reduce((sum, s) => sum + s.calories, 0) / stats.length),
+    avgProtein: Math.round(stats.reduce((sum, s) => sum + s.protein, 0) / stats.length),
+    avgCarbs: Math.round(stats.reduce((sum, s) => sum + s.carbs, 0) / stats.length),
+    avgFat: Math.round(stats.reduce((sum, s) => sum + s.fat, 0) / stats.length),
+  }));
+
+  // Calculate monthly averages
+  const monthlyMap = new Map<string, { stats: DailyMacroStats[]; month: string }>();
+  dailyStats.forEach((stat) => {
+    const date = new Date(stat.date);
+    const monthStr = date.toISOString().slice(0, 7); // YYYY-MM
+
+    if (!monthlyMap.has(monthStr)) {
+      monthlyMap.set(monthStr, { stats: [], month: monthStr });
+    }
+    monthlyMap.get(monthStr)!.stats.push(stat);
+  });
+
+  const monthlyAverages = Array.from(monthlyMap.values()).map(({ stats, month }) => ({
+    month,
+    avgCalories: Math.round(stats.reduce((sum, s) => sum + s.calories, 0) / stats.length),
+    avgProtein: Math.round(stats.reduce((sum, s) => sum + s.protein, 0) / stats.length),
+    avgCarbs: Math.round(stats.reduce((sum, s) => sum + s.carbs, 0) / stats.length),
+    avgFat: Math.round(stats.reduce((sum, s) => sum + s.fat, 0) / stats.length),
+  }));
+
+  // Calculate consistency metrics
+  const daysTracked = dailyStats.length;
+  let daysHitCalorieTarget = 0;
+  let daysHitProteinTarget = 0;
+  let daysHitCarbsTarget = 0;
+  let daysHitFatTarget = 0;
+
+  dailyStats.forEach((stat) => {
+    // Allow 10% margin for calorie target
+    if (stat.calories >= calorieTarget * 0.9 && stat.calories <= calorieTarget * 1.1) {
+      daysHitCalorieTarget++;
+    }
+    // Allow 10% margin for protein target
+    if (stat.protein >= proteinTarget * 0.9 && stat.protein <= proteinTarget * 1.1) {
+      daysHitProteinTarget++;
+    }
+    // Allow 10% margin for carbs target
+    if (stat.carbs >= carbsTarget * 0.9 && stat.carbs <= carbsTarget * 1.1) {
+      daysHitCarbsTarget++;
+    }
+    // Allow 10% margin for fat target
+    if (stat.fat >= fatTarget * 0.9 && stat.fat <= fatTarget * 1.1) {
+      daysHitFatTarget++;
+    }
+  });
+
+  const adherenceRate = daysTracked > 0 
+    ? Math.round(((daysHitCalorieTarget + daysHitProteinTarget + daysHitCarbsTarget + daysHitFatTarget) / (daysTracked * 4)) * 100)
+    : 0;
+
+  return {
+    dailyStats,
+    weeklyAverages,
+    monthlyAverages,
+    consistencyMetrics: {
+      daysTracked,
+      daysHitCalorieTarget,
+      daysHitProteinTarget,
+      daysHitCarbsTarget,
+      daysHitFatTarget,
+      adherenceRate,
+    },
+  };
+}
