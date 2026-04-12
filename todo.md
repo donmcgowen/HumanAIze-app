@@ -793,3 +793,15 @@ Note: Modal rendering issue encountered. Feature skipped for now. Can be revisit
 - [x] Add delete functionality with hover overlay
 - [x] Integrate ProgressPhotos component into Profile page
 - [x] Test camera capture and photo upload
+
+
+## Bug Fix - Profile Save Not Working (v1.60 - COMPLETE)
+
+- [x] Fix profile upsert to properly save biometric data (height, weight, age)
+- [x] Fix profile upsert to properly save fitness goal
+- [x] Fix profile upsert to properly save goal weight and goal date
+- [x] Fix profile upsert to properly save daily calorie and macro targets
+- [x] Test profile save with all fields populated
+- [x] Verify data persists after page reload
+- [x] Add success toast notification when profile saves
+- [x] Fix "No values to set" database error when saving empty fields

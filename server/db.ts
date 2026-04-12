@@ -107,6 +107,7 @@ export async function upsertUserProfile(userId: number, updates: Partial<InsertU
         .set(filteredUpdates)
         .where(eq(userProfiles.userId, userId));
     }
+    // If no values to update, that's OK - just return existing profile
   } else {
     const insert: InsertUserProfile = {
       userId,
