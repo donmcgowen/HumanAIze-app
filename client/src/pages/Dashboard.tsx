@@ -9,6 +9,15 @@ export default function Dashboard() {
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
+  // Fetch today's food macros
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
+  const { data: todayFoodLogs } = trpc.food.getDayLogs.useQuery({
+    startOfDay,
+    endOfDay,
+  });
+
   useEffect(() => {
     if (syncData?.lastSyncTime) {
       const lastSync = new Date(syncData.lastSyncTime);
@@ -45,6 +54,17 @@ export default function Dashboard() {
 
   const { summary, chart, sourcesByCategory } = dashboard;
 
+  // Calculate macro totals from today's food logs
+  const macroTotals = todayFoodLogs?.reduce(
+    (acc, log) => ({
+      calories: acc.calories + (log.calories || 0),
+      protein: acc.protein + (log.proteinGrams || 0),
+      carbs: acc.carbs + (log.carbsGrams || 0),
+      fat: acc.fat + (log.fatGrams || 0),
+    }),
+    { calories: 0, protein: 0, carbs: 0, fat: 0 }
+  ) || { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
   return (
     <div className="space-y-8 p-6 w-full max-w-full">
       {/* Header */}
@@ -58,30 +78,34 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Key Metrics Grid */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Glucose Average</div>
-          <div className="text-3xl font-bold">{summary.glucoseAverage.toFixed(1)}</div>
-          <div className="text-xs text-slate-500 mt-1">mg/dL</div>
+      {/* Macros Grid */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+        {/* Calories - Large card */}
+        <div className="sm:col-span-2 bg-slate-900 border border-slate-800 rounded-lg p-6">
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Calories</div>
+          <div className="text-4xl font-bold text-orange-400">{Math.round(macroTotals.calories)}</div>
+          <div className="text-xs text-slate-500 mt-1">kcal today</div>
         </div>
 
+        {/* Protein */}
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Time in Range</div>
-          <div className="text-3xl font-bold">{summary.timeInRangeEstimate}%</div>
-          <div className="text-xs text-slate-500 mt-1">80–160 mg/dL</div>
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Protein</div>
+          <div className="text-2xl font-bold text-blue-400">{Math.round(macroTotals.protein)}</div>
+          <div className="text-xs text-slate-500 mt-1">g</div>
         </div>
 
+        {/* Carbs */}
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Sleep Average</div>
-          <div className="text-3xl font-bold">{summary.sleepAverage.toFixed(1)}h</div>
-          <div className="text-xs text-slate-500 mt-1">per night</div>
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Carbs</div>
+          <div className="text-2xl font-bold text-green-400">{Math.round(macroTotals.carbs)}</div>
+          <div className="text-xs text-slate-500 mt-1">g</div>
         </div>
 
+        {/* Fat */}
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Steps Average</div>
-          <div className="text-3xl font-bold">{summary.stepsAverage.toLocaleString()}</div>
-          <div className="text-xs text-slate-500 mt-1">daily</div>
+          <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Fat</div>
+          <div className="text-2xl font-bold text-yellow-400">{Math.round(macroTotals.fat)}</div>
+          <div className="text-xs text-slate-500 mt-1">g</div>
         </div>
       </div>
 
