@@ -7,4 +7,8 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  azureStorageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME ?? "",
+  azureStorageContainerName: process.env.AZURE_STORAGE_CONTAINER_NAME ?? "",
+  azureStorageAccountKey: process.env.AZURE_STORAGE_ACCOUNT_KEY ?? "",
 };
+
