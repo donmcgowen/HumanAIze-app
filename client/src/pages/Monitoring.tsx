@@ -80,6 +80,24 @@ export function Monitoring() {
           <p className="text-slate-400">Connect and manage your custom health data sources</p>
         </div>
 
+        {/* Weight Tracking Section - TOP */}
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-white mb-3 flex items-center gap-2">
+            <Weight className="w-5 h-5 text-blue-400" />
+            Weight Tracking
+          </h2>
+          <WeightTracker />
+        </div>
+
+        {/* Steps Section */}
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold text-white mb-3 flex items-center gap-2">
+            <Footprints className="w-5 h-5 text-cyan-400" />
+            Steps
+          </h2>
+          <StepCounter onTotalChange={handleStepUpdate} />
+        </div>
+
         {/* Connected Sources Dropdown */}
         <Card className="mb-6 border border-white/10 bg-slate-950">
           <CardHeader>
@@ -206,23 +224,7 @@ export function Monitoring() {
           </CardContent>
         </Card>
 
-        {/* Steps Section */}
-        <div className="mt-6">
-          <h2 className="text-xl font-semibold text-white mb-3 flex items-center gap-2">
-            <Footprints className="w-5 h-5 text-cyan-400" />
-            Steps
-          </h2>
-          <StepCounter onTotalChange={handleStepUpdate} />
-        </div>
 
-        {/* Weight Tracking Section */}
-        <div className="mt-6">
-          <h2 className="text-xl font-semibold text-white mb-3 flex items-center gap-2">
-            <Weight className="w-5 h-5 text-blue-400" />
-            Weight Tracking
-          </h2>
-          <WeightTracker />
-        </div>
       </div>
     </div>
   );
