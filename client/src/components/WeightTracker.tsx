@@ -62,7 +62,13 @@ export function WeightTracker() {
   return (
     <div className="space-y-6">
       {/* Weight Stats */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+          <p className="text-xs text-slate-400 uppercase tracking-wide">Starting Weight</p>
+          <p className="text-2xl font-bold text-cyan-400 mt-2">
+            {startWeight ? `${startWeight} lbs` : "No data"}
+          </p>
+        </div>
         <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
           <p className="text-xs text-slate-400 uppercase tracking-wide">Current Weight</p>
           <p className="text-2xl font-bold text-blue-400 mt-2">
