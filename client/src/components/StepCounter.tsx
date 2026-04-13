@@ -36,7 +36,11 @@ function magnitude(x: number, y: number, z: number): number {
 
 const DAILY_GOAL = 10000;
 
-export function StepCounter() {
+interface StepCounterProps {
+  onTotalChange?: (total: number) => void;
+}
+
+export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   const dayStart = todayStart();
 
   // Server state
@@ -132,6 +136,11 @@ export function StepCounter() {
 
   const totalToday = (savedSteps || 0) + sessionSteps;
   const progressPct = Math.min(100, Math.round((totalToday / DAILY_GOAL) * 100));
+
+  // Notify parent whenever the live total changes
+  useEffect(() => {
+    onTotalChange?.(totalToday);
+  }, [totalToday, onTotalChange]);
 
   // Chart data — replace today's saved value with live total
   const chartData = (() => {

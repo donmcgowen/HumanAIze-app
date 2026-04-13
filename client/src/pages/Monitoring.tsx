@@ -6,7 +6,7 @@ import { InsightsPanel } from "@/components/InsightsPanel";
 import { StepCounter } from "@/components/StepCounter";
 import { Loader2, Zap, Plus, ChevronDown, Footprints } from "lucide-react";
 import { useLocation } from "wouter";
-import { useState } from "react";
+import { useState, useCallback } from "react";
 
 function todayStart() {
   const d = new Date();
@@ -18,7 +18,8 @@ export function Monitoring() {
   const { data: user, isLoading } = trpc.auth.me.useQuery();
   const { data: sources, isLoading: sourcesLoading } = trpc.sources.list.useQuery();
   const { data: dashboard } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
-  const { data: todaySteps = 0 } = trpc.steps.getToday.useQuery({ dayStart: todayStart() });
+  const [liveSteps, setLiveSteps] = useState(0);
+  const handleStepUpdate = useCallback((total: number) => setLiveSteps(total), []);
   const [, navigate] = useLocation();
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
 
@@ -187,7 +188,7 @@ export function Monitoring() {
                   <Footprints className="w-4 h-4 text-cyan-400" />
                   <p className="text-slate-400 text-sm">Steps Today</p>
                 </div>
-                <p className="text-2xl font-bold text-cyan-400">{todaySteps.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-cyan-400">{liveSteps.toLocaleString()}</p>
                 <p className="text-xs text-slate-500 mt-1">Built-in pedometer • goal: 10,000</p>
               </div>
               <div className="p-4 rounded-lg bg-slate-900 border border-white/10">
@@ -210,7 +211,7 @@ export function Monitoring() {
             <Footprints className="w-5 h-5 text-cyan-400" />
             Steps
           </h2>
-          <StepCounter />
+          <StepCounter onTotalChange={handleStepUpdate} />
         </div>
       </div>
     </div>
