@@ -1108,7 +1108,10 @@ export async function getCGMStats(userId: number, days: number = 30) {
   const inRange = values.filter(v => v >= 70 && v <= 180).length;
   const above = values.filter(v => v > 180).length;
   const below = values.filter(v => v < 70).length;
-  const a1c = Math.round(((avg + 46.7) / 28.7) * 100) / 100;
+  // Correct A1C formula: (average_glucose / 28.7) + 2.15
+  const a1c = Math.round(((avg / 28.7) + 2.15) * 100) / 100;
+  // Ensure A1C is within valid range (4-12%)
+  const a1cClamped = Math.max(4, Math.min(12, a1c));
 
   return {
     count: readings.length,
@@ -1118,7 +1121,7 @@ export async function getCGMStats(userId: number, days: number = 30) {
     timeInRange: Math.round((inRange / values.length) * 100),
     timeAboveRange: Math.round((above / values.length) * 100),
     timeBelowRange: Math.round((below / values.length) * 100),
-    a1cEstimate: a1c,
+    a1cEstimate: a1cClamped,
     latestReading: readings[0]?.mgdl ?? null,
     latestAt: readings[0]?.readingAt ?? null,
   };

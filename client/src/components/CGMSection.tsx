@@ -7,6 +7,11 @@ import { trpc } from "@/lib/trpc";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import * as pdfjsLib from "pdfjs-dist";
 
+// Configure PDF.js worker
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+}
+
 export function CGMSection() {
   const utils = trpc.useUtils();
 
