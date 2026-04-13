@@ -18,6 +18,7 @@ export function WeightTracker() {
   // Fetch weight entries and progress data
   const { data: entries = [], refetch: refetchEntries } = trpc.weight.getEntries.useQuery({ days: 90 });
   const { data: progressData = [] } = trpc.weight.getProgressData.useQuery({ days: 90 });
+  const { data: weeklyRate } = trpc.weight.getWeeklyRate.useQuery();
 
   // Mutation to add weight entry
   const addWeightMutation = trpc.weight.addEntry.useMutation({
@@ -61,6 +62,12 @@ export function WeightTracker() {
   const startWeight = entries.length > 0 ? entries[entries.length - 1].weightLbs : null;
   const weightChange = currentWeight && startWeight ? currentWeight - startWeight : 0;
 
+  // Format estimated completion date
+  const formatCompletionDate = (date: Date | null) => {
+    if (!date) return "N/A";
+    return new Date(date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
   return (
     <div className="space-y-6">
       {/* Weight Stats */}
@@ -84,6 +91,23 @@ export function WeightTracker() {
           </p>
         </div>
       </div>
+
+      {/* Weekly Progress Stats */}
+      {weeklyRate && weeklyRate.weeklyRate !== 0 && (
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+            <p className="text-xs text-slate-400 uppercase tracking-wide">Weekly Loss Rate</p>
+            <p className="text-2xl font-bold text-purple-400 mt-2">{Math.abs(weeklyRate.weeklyRate)} lbs/week</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
+            <p className="text-xs text-slate-400 uppercase tracking-wide">Est. Completion</p>
+            <p className="text-lg font-bold text-green-400 mt-2">{formatCompletionDate(weeklyRate.estimatedCompletionDate)}</p>
+            {weeklyRate.daysUntilCompletion && (
+              <p className="text-xs text-slate-400 mt-1">{weeklyRate.daysUntilCompletion} days away</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Add Weight Button */}
       <Dialog open={open} onOpenChange={setOpen}>

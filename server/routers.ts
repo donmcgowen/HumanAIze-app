@@ -855,6 +855,24 @@ export const appRouter = router({
         })
       )
       .query(({ ctx, input }) => getWeightProgressData(ctx.user.id, input.days)),
+    getWeeklyRate: protectedProcedure
+      .query(async ({ ctx }) => {
+        const goalProgress = await getGoalProgress(ctx.user.id);
+        if (!goalProgress) {
+          return {
+            weeklyRate: 0,
+            estimatedCompletionDate: null,
+            daysUntilCompletion: null,
+            isOnTrack: false,
+          };
+        }
+        return {
+          weeklyRate: Math.round(goalProgress.weeklyWeightChangeRate * 10) / 10,
+          estimatedCompletionDate: goalProgress.estimatedCompletionDate,
+          daysUntilCompletion: goalProgress.daysUntilCompletion,
+          isOnTrack: goalProgress.isOnTrack,
+        };
+      }),
   }),
 });
 
