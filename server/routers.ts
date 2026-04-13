@@ -23,7 +23,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends } from "./db";
 import { searchUSDAFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
@@ -881,6 +881,43 @@ export const appRouter = router({
           isOnTrack: goalProgress.isOnTrack,
         };
       }),
+  }),
+  bodyMeasurements: router({
+    addEntry: protectedProcedure
+      .input(
+        z.object({
+          chestInches: z.number().positive().optional(),
+          waistInches: z.number().positive().optional(),
+          hipsInches: z.number().positive().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        addBodyMeasurement(
+          ctx.user.id,
+          input.chestInches,
+          input.waistInches,
+          input.hipsInches,
+          input.notes
+        )
+      ),
+    getEntries: protectedProcedure
+      .input(
+        z.object({
+          limit: z.number().int().min(1).max(200).default(100),
+        })
+      )
+      .query(({ ctx, input }) => getBodyMeasurements(ctx.user.id, input.limit)),
+    deleteEntry: protectedProcedure
+      .input(z.object({ entryId: z.number().int() }))
+      .mutation(({ ctx, input }) => deleteBodyMeasurement(input.entryId, ctx.user.id)),
+    getTrends: protectedProcedure
+      .input(
+        z.object({
+          days: z.number().int().min(7).max(365).default(30),
+        })
+      )
+      .query(({ ctx, input }) => getBodyMeasurementTrends(ctx.user.id, input.days)),
   }),
   cgm: router({
     getStats: protectedProcedure

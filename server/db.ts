@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, lt, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto, glucoseReadings, GlucoseReading, activitySamples, weightEntries, InsertWeightEntry, WeightEntry } from "../drizzle/schema";
+import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto, glucoseReadings, GlucoseReading, activitySamples, weightEntries, InsertWeightEntry, WeightEntry, bodyMeasurements, InsertBodyMeasurement, BodyMeasurement } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -1162,4 +1162,88 @@ export async function getRecentFoodLogsForInsights(userId: number, days: number 
     .where(and(eq(foodLogs.userId, userId), gte(foodLogs.loggedAt, since)))
     .orderBy(desc(foodLogs.loggedAt))
     .limit(50);
+}
+
+// Body Measurements
+export async function addBodyMeasurement(
+  userId: number,
+  chest?: number,
+  waist?: number,
+  hips?: number,
+  notes?: string
+): Promise<BodyMeasurement | null> {
+  const db = await getDb();
+  if (!db) return null;
+
+  const result = await db.insert(bodyMeasurements).values({
+    userId,
+    chestInches: chest,
+    waistInches: waist,
+    hipsInches: hips,
+    recordedAt: Date.now(),
+    notes,
+  });
+
+  return result as any;
+}
+
+export async function getBodyMeasurements(userId: number, limit: number = 100): Promise<BodyMeasurement[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select()
+    .from(bodyMeasurements)
+    .where(eq(bodyMeasurements.userId, userId))
+    .orderBy(desc(bodyMeasurements.recordedAt))
+    .limit(limit);
+}
+
+export async function deleteBodyMeasurement(id: number, userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db.delete(bodyMeasurements)
+    .where(and(eq(bodyMeasurements.id, id), eq(bodyMeasurements.userId, userId)));
+
+  return (result as any).affectedRows > 0;
+}
+
+export async function getBodyMeasurementTrends(userId: number, days: number = 30): Promise<{
+  chest: { current?: number; previous?: number; change?: number };
+  waist: { current?: number; previous?: number; change?: number };
+  hips: { current?: number; previous?: number; change?: number };
+}> {
+  const db = await getDb();
+  if (!db) return { chest: {}, waist: {}, hips: {} };
+
+  const since = Date.now() - days * 24 * 60 * 60 * 1000;
+  const measurements = await db.select()
+    .from(bodyMeasurements)
+    .where(and(eq(bodyMeasurements.userId, userId), gte(bodyMeasurements.recordedAt, since)))
+    .orderBy(desc(bodyMeasurements.recordedAt));
+
+  if (measurements.length === 0) {
+    return { chest: {}, waist: {}, hips: {} };
+  }
+
+  const latest = measurements[0];
+  const oldest = measurements[measurements.length - 1];
+
+  return {
+    chest: {
+      current: latest.chestInches ?? undefined,
+      previous: oldest.chestInches ?? undefined,
+      change: latest.chestInches && oldest.chestInches ? latest.chestInches - oldest.chestInches : undefined,
+    },
+    waist: {
+      current: latest.waistInches ?? undefined,
+      previous: oldest.waistInches ?? undefined,
+      change: latest.waistInches && oldest.waistInches ? latest.waistInches - oldest.waistInches : undefined,
+    },
+    hips: {
+      current: latest.hipsInches ?? undefined,
+      previous: oldest.hipsInches ?? undefined,
+      change: latest.hipsInches && oldest.hipsInches ? latest.hipsInches - oldest.hipsInches : undefined,
+    },
+  };
 }

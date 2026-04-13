@@ -5,6 +5,7 @@ import { InsightsPanel } from "@/components/InsightsPanel";
 import { StepCounter } from "@/components/StepCounter";
 import { WeightTracker } from "@/components/WeightTracker";
 import { CGMSection } from "@/components/CGMSection";
+import { BodyMeasurementSection } from "@/components/BodyMeasurementSection";
 import { Loader2, Zap, Plus, ChevronDown, Footprints, Weight } from "lucide-react";
 import { useLocation } from "wouter";
 import { useState, useCallback } from "react";
@@ -113,6 +114,11 @@ export function Monitoring() {
             Weight Tracking
           </h2>
           <WeightTracker />
+        </div>
+
+        {/* Body Measurements Section */}
+        <div className="mb-6">
+          <BodyMeasurementSection />
         </div>
 
         {/* Steps Section */}

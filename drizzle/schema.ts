@@ -328,3 +328,17 @@ export const weightEntries = mysqlTable("weight_entries", {
 
 export type WeightEntry = typeof weightEntries.$inferSelect;
 export type InsertWeightEntry = typeof weightEntries.$inferInsert;
+
+export const bodyMeasurements = mysqlTable("body_measurements", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id),
+  chestInches: double("chestInches"), // Chest measurement in inches
+  waistInches: double("waistInches"), // Waist measurement in inches
+  hipsInches: double("hipsInches"), // Hips measurement in inches
+  recordedAt: bigint("recordedAt", { mode: "number" }).notNull(), // Unix timestamp
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type BodyMeasurement = typeof bodyMeasurements.$inferSelect;
+export type InsertBodyMeasurement = typeof bodyMeasurements.$inferInsert;
