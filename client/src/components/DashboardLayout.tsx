@@ -17,6 +17,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -83,6 +84,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 function DashboardLayoutContent({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
+  const { setOpen, isMobile } = useSidebar();
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -107,7 +109,13 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
                     tooltip={item.label}
                     isActive={isActive}
                     className="h-11 rounded-none border border-transparent px-3 data-[active=true]:border-cyan-300/40 data-[active=true]:bg-cyan-300/10 data-[active=true]:text-white"
-                    onClick={() => setLocation(item.path)}
+                    onClick={() => {
+                      setLocation(item.path);
+                      // Auto-collapse sidebar on desktop when menu item is clicked
+                      if (!isMobile) {
+                        setOpen(false);
+                      }
+                    }}
                   >
                     <item.icon className="h-4 w-4" />
                     <span className="font-medium tracking-[0.04em]">{item.label}</span>

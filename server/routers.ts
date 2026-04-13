@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { getDb } from "./db";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -31,6 +31,7 @@ import { generateFoodInsights, type DailyMacros } from "./insights";
 import { getMealSuggestions, getMealSuggestionsByCategory } from "@shared/mealSuggestions";
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
 import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoAndVoice } from "./foodRecognition";
+
 import { storagePut } from "./storage";
 import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnalysis";
 import { searchFoodWithGemini, calculateMacrosForServing } from "./geminiFood";
@@ -38,6 +39,8 @@ import { searchFoodWithGemini, calculateMacrosForServing } from "./geminiFood";
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),
 });
+
+import { z } from "zod";
 
 const aiRouter = router({
   analyzeMeal: protectedProcedure
@@ -739,6 +742,62 @@ export const appRouter = router({
         throw new Error("Unauthorized");
       }
       return migrateCustomAppToConnectApp();
+    }),
+    runDatabaseMigration: protectedProcedure.mutation(async ({ ctx }) => {
+      // Only allow owner to run migrations
+      if (ctx.user.id !== 1) {
+        throw new Error("Unauthorized");
+      }
+      
+      const fs = await import('fs');
+      const path = await import('path');
+      const { getDb } = await import('./db');
+      
+      try {
+        // Get database connection
+        const database = await getDb();
+        if (!database) {
+          throw new Error('Database connection not available');
+        }
+        
+        // Read the migration SQL file
+        const migrationPath = path.join(process.cwd(), 'drizzle', 'migrations', '0002_create_all_tables.sql');
+        const sql = fs.readFileSync(migrationPath, 'utf-8');
+        
+        // Split SQL by semicolon and execute each statement
+        const statements = sql.split(';').filter((s: string) => s.trim());
+        let executedCount = 0;
+        
+        for (const statement of statements) {
+          if (statement.trim()) {
+            try {
+              await database.execute(statement);
+              executedCount++;
+              console.log(`[Migration] Executed statement ${executedCount}/${statements.length}`);
+            } catch (error: any) {
+              // Table already exists - continue
+              if (error.code === 'ER_TABLE_EXISTS_ERROR' || error.message?.includes('already exists')) {
+                console.log(`[Migration] Table already exists, skipping`);
+                executedCount++;
+              } else {
+                throw error;
+              }
+            }
+          }
+        }
+        
+        return {
+          success: true,
+          message: `Migration completed: ${executedCount} statements executed`,
+          statementsExecuted: executedCount,
+        };
+      } catch (error: any) {
+        console.error('[Migration] Error:', error);
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: `Migration failed: ${error.message}`,
+        });
+      }
     }),
   }),
   progress: router({
