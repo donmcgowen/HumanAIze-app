@@ -143,9 +143,9 @@ export function WeightTracker() {
 
       {/* Weight Progress Graph */}
       {progressData.length > 0 && (
-        <div className="bg-slate-900 border border-slate-700 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-slate-300 mb-4">Weight Progression</h3>
-          <ResponsiveContainer width="100%" height={300}>
+        <div className="bg-slate-900 border border-slate-700 rounded-lg p-3">
+          <h3 className="text-xs font-semibold text-slate-300 mb-2">Weight Progression</h3>
+          <ResponsiveContainer width="100%" height={150}>
             <LineChart data={progressData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis

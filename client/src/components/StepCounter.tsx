@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Footprints, Play, Square, RotateCcw, TrendingUp } from "lucide-react";
+import { Footprints, TrendingUp } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 // ---------- helpers ----------------------------------------------------------
@@ -55,11 +52,10 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   const [sessionSteps, setSessionSteps] = useState(0);
   const [isTracking, setIsTracking] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
-  const [permissionGranted, setPermissionGranted] = useState(false);
 
   const lastMagRef = useRef(0);
   const lastStepTimeRef = useRef(0);
-  const sessionStepsRef = useRef(0); // keep ref in sync for the event handler
+  const sessionStepsRef = useRef(0);
 
   useEffect(() => {
     sessionStepsRef.current = sessionSteps;
@@ -102,10 +98,7 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   }, []);
 
   const startTracking = useCallback(async () => {
-    // iOS 13+ requires explicit permission
-    if (
-      typeof (DeviceMotionEvent as any).requestPermission === "function"
-    ) {
+    if (typeof (DeviceMotionEvent as any).requestPermission === "function") {
       try {
         const state = await (DeviceMotionEvent as any).requestPermission();
         if (state !== "granted") return;
@@ -113,7 +106,6 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
         return;
       }
     }
-    setPermissionGranted(true);
     window.addEventListener("devicemotion", handleMotion);
     setIsTracking(true);
   }, [handleMotion]);
@@ -123,10 +115,6 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
     setIsTracking(false);
   }, [handleMotion]);
 
-  const resetSession = useCallback(() => {
-    setSessionSteps(0);
-  }, []);
-
   // Clean up on unmount
   useEffect(() => {
     return () => {
@@ -135,7 +123,6 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   }, [handleMotion]);
 
   const totalToday = (savedSteps || 0) + sessionSteps;
-  const progressPct = Math.min(100, Math.round((totalToday / DAILY_GOAL) * 100));
 
   // Notify parent whenever the live total changes
   useEffect(() => {
@@ -152,117 +139,48 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   })();
 
   return (
-    <Card className="border border-white/10 bg-slate-950 mt-6">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Footprints className="w-5 h-5 text-cyan-400" />
-            <div>
-              <CardTitle className="text-white">Step Counter</CardTitle>
-              <CardDescription>Built-in pedometer using your device accelerometer</CardDescription>
-            </div>
-          </div>
+    <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 space-y-4">
+      {/* Header with title and current steps */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Footprints className="w-4 h-4 text-cyan-400" />
+          <span className="text-sm font-semibold text-slate-300">Steps</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-bold text-cyan-400">{totalToday.toLocaleString()}</span>
           {isTracking && (
-            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 animate-pulse">
+            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 animate-pulse text-xs">
               Tracking
             </Badge>
           )}
         </div>
-      </CardHeader>
+      </div>
 
-      <CardContent className="space-y-6">
-        {/* Big step number */}
-        <div className="text-center py-4">
-          <p className="text-6xl font-bold text-white tabular-nums">{totalToday.toLocaleString()}</p>
-          <p className="text-slate-400 mt-1">steps today</p>
-          {sessionSteps > 0 && (
-            <p className="text-cyan-400 text-sm mt-1">+{sessionSteps.toLocaleString()} this session</p>
-          )}
+      {/* 7-day mini chart */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-1">
+          <TrendingUp className="w-3 h-3 text-slate-400" />
+          <p className="text-xs text-slate-400">Last 7 days</p>
         </div>
-
-        {/* Progress bar */}
-        <div>
-          <div className="flex justify-between text-sm mb-1">
-            <span className="text-slate-400">Daily goal</span>
-            <span className="text-slate-300 font-medium">{progressPct}% of {DAILY_GOAL.toLocaleString()}</span>
-          </div>
-          <Progress
-            value={progressPct}
-            className="h-3 bg-slate-800"
-          />
-        </div>
-
-        {/* Controls */}
-        {supported === false ? (
-          <div className="rounded-lg bg-slate-900 border border-white/10 p-4 text-center">
-            <p className="text-slate-400 text-sm">Accelerometer not available on this device.</p>
-            <p className="text-slate-500 text-xs mt-1">Use a mobile device for automatic step detection.</p>
-          </div>
-        ) : (
-          <div className="flex gap-3">
-            {!isTracking ? (
-              <Button
-                onClick={startTracking}
-                className="flex-1 bg-cyan-500 hover:bg-cyan-600 text-white font-semibold flex items-center gap-2"
-              >
-                <Play className="w-4 h-4" />
-                Start Tracking
-              </Button>
-            ) : (
-              <Button
-                onClick={stopTracking}
-                className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-semibold flex items-center gap-2"
-                variant="outline"
-              >
-                <Square className="w-4 h-4" />
-                Stop
-              </Button>
-            )}
-            {sessionSteps > 0 && (
-              <Button
-                onClick={resetSession}
-                variant="outline"
-                className="border-white/10 text-slate-400 hover:text-white"
-                title="Reset session steps"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </Button>
-            )}
-          </div>
-        )}
-
-        {/* 7-day chart */}
-        <div>
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp className="w-4 h-4 text-slate-400" />
-            <p className="text-slate-400 text-sm">Last 7 days</p>
-          </div>
-          <ResponsiveContainer width="100%" height={120}>
-            <BarChart data={chartData} barSize={28}>
-              <XAxis dataKey="label" tick={{ fill: "#94a3b8", fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis hide />
-              <Tooltip
-                contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8 }}
-                labelStyle={{ color: "#e2e8f0" }}
-                itemStyle={{ color: "#22d3ee" }}
-                formatter={(v: number) => [v.toLocaleString(), "steps"]}
-              />
-              <Bar dataKey="steps" radius={[4, 4, 0, 0]}>
-                {chartData.map((entry, i) => (
-                  <Cell key={i} fill={entry.isToday ? "#22d3ee" : "#334155"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Goal achievement message */}
-        {totalToday >= DAILY_GOAL && (
-          <div className="rounded-lg bg-green-500/10 border border-green-500/30 p-3 text-center">
-            <p className="text-green-400 font-semibold">Goal reached! Great work today.</p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        <ResponsiveContainer width="100%" height={80}>
+          <BarChart data={chartData} barSize={16}>
+            <XAxis dataKey="label" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis hide />
+            <Tooltip
+              contentStyle={{ background: "#0f172a", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6 }}
+              labelStyle={{ color: "#e2e8f0" }}
+              itemStyle={{ color: "#22d3ee" }}
+              formatter={(v: number) => [v.toLocaleString(), "steps"]}
+              cursor={{ fill: "rgba(34, 211, 238, 0.1)" }}
+            />
+            <Bar dataKey="steps" radius={[3, 3, 0, 0]}>
+              {chartData.map((entry, i) => (
+                <Cell key={i} fill={entry.isToday ? "#22d3ee" : "#334155"} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
