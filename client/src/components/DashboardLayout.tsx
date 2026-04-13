@@ -23,7 +23,8 @@ import { getLoginUrl } from "@/const";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Activity, Bot, Cable, LayoutDashboard, LineChart, LogOut, Mail, User, Apple, Dumbbell, HelpCircle, TrendingUp } from "lucide-react";
 import type { ReactNode } from "react";
-import { useLocation } from "wouter";
+  import { useEffect } from "react";
+  import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 
 const menuItems = [
@@ -86,6 +87,13 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
   const [location, setLocation] = useLocation();
   const { setOpen, isMobile } = useSidebar();
 
+  // Auto-collapse sidebar when location changes on desktop
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth > 768 && !isMobile) {
+      setOpen(false);
+    }
+  }, [location, isMobile, setOpen]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar/95 backdrop-blur">
@@ -111,10 +119,6 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
                     className="h-11 rounded-none border border-transparent px-3 data-[active=true]:border-cyan-300/40 data-[active=true]:bg-cyan-300/10 data-[active=true]:text-white"
                     onClick={() => {
                       setLocation(item.path);
-                      // Auto-collapse sidebar on desktop when menu item is clicked
-                      if (!isMobile) {
-                        setOpen(false);
-                      }
                     }}
                   >
                     <item.icon className="h-4 w-4" />
