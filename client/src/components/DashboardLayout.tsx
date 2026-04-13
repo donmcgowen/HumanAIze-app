@@ -74,7 +74,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SidebarProvider>
+    <SidebarProvider defaultOpen={true}>
       <DashboardLayoutContent>{children}</DashboardLayoutContent>
     </SidebarProvider>
   );
@@ -86,11 +86,11 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <Sidebar className="border-r border-sidebar-border bg-sidebar/95 backdrop-blur">
+      <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-sidebar/95 backdrop-blur">
         <SidebarHeader className="border-b border-white/10 px-4 py-5">
           <button className="flex w-full items-start gap-3 text-left" onClick={() => setLocation("/dashboard")}>
-            <div className="mt-1 h-3 w-3 rounded-none border border-cyan-300 bg-cyan-200/30" />
-            <div>
+            <div className="mt-1 h-3 w-3 rounded-none border border-cyan-300 bg-cyan-200/30 flex-shrink-0" />
+            <div className="group-data-[collapsible=icon]:hidden">
               <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-cyan-200/70">HumanAIze</p>
               <h2 className="mt-2 text-base font-black uppercase tracking-[0.12em] text-white">Personalized health AI</h2>
             </div>
@@ -98,10 +98,6 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
         </SidebarHeader>
 
         <SidebarContent className="px-3 py-4">
-          <div className="mb-4 border border-white/10 bg-white/[0.03] p-3">
-            <p className="text-[11px] uppercase tracking-[0.35em] text-slate-400">Live mode</p>
-            <p className="mt-2 text-sm font-semibold text-white">Unified glucose, activity, nutrition, and sleep analytics</p>
-          </div>
           <SidebarMenu>
             {menuItems.map((item) => {
               const isActive = location === item.path;
