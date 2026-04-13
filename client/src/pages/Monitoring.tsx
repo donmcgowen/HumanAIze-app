@@ -41,34 +41,9 @@ export function Monitoring() {
   const generateInsights = () => {
     const insights = [];
     
-    // Weight Loss Insights
-    if (user?.profile?.goalWeightLbs && user?.profile?.weightLbs) {
-      const currentWeight = user.profile.weightLbs;
-      const goalWeight = user.profile.goalWeightLbs;
-      const weightToLose = currentWeight - goalWeight;
-      
-      if (weightToLose > 0) {
-        // Estimate weekly loss rate (assuming ~1-2 lbs per week is healthy)
-        const weeklyLossRate = 1.5; // Default healthy rate
-        const weeksToGoal = Math.ceil(weightToLose / weeklyLossRate);
-        const targetDate = new Date();
-        targetDate.setDate(targetDate.getDate() + weeksToGoal * 7);
-        
-        insights.push({
-          type: "success" as const,
-          title: "Weight Loss Goal Progress",
-          description: `You're on track to lose ${weightToLose} lbs to reach your goal of ${goalWeight} lbs. At a healthy rate of ~1.5 lbs/week, you could reach your goal by ${targetDate.toLocaleDateString()}.`,
-          action: "Maintain consistent weight tracking and nutrition to stay on pace."
-        });
-      } else if (weightToLose === 0) {
-        insights.push({
-          type: "success" as const,
-          title: "Goal Weight Reached!",
-          description: "Congratulations! You've reached your goal weight. Focus on maintaining your progress.",
-          action: "Continue tracking to maintain your weight and healthy habits."
-        });
-      }
-    }
+    // Weight Loss Insights - placeholder
+    // Note: weightProgress is not available in dashboard.summary
+    // This would need to be fetched from weight tracking data
     
     // Steps Insights
     if (liveSteps > 0) {
@@ -107,37 +82,13 @@ export function Monitoring() {
     }
     
     // Personalized Recommendations
-    if (user?.profile?.goalWeightLbs && user?.profile?.weightLbs) {
-      const currentWeight = user.profile.weightLbs;
-      const goalWeight = user.profile.goalWeightLbs;
-      
-      if (currentWeight > goalWeight) {
-        const recommendations = [];
-        
-        // Activity recommendation
-        if (liveSteps < 8000) {
-          recommendations.push("Increase daily steps to 10,000+ for better calorie burn");
-        }
-        
-        // Nutrition recommendation
-        if (user?.profile?.dailyCalorieTarget) {
-          recommendations.push(`Follow your daily calorie target of ${user.profile.dailyCalorieTarget} kcal`);
-        } else {
-          recommendations.push("Set a daily calorie target in your profile for personalized guidance");
-        }
-        
-        // Consistency recommendation
-        recommendations.push("Track your weight consistently to monitor progress");
-        
-        if (recommendations.length > 0) {
-          insights.push({
-            type: "tip" as const,
-            title: "Recommendations to Hit Your Goal",
-            description: recommendations.join(" • "),
-            action: "Review your profile settings to optimize your goals."
-          });
-        }
-      }
+    if (liveSteps < 8000) {
+      insights.push({
+        type: "tip" as const,
+        title: "Recommendations to Hit Your Goal",
+        description: "Increase daily steps to 10,000+ for better calorie burn and improved health. Track your weight consistently to monitor progress.",
+        action: "Review your profile settings to optimize your goals."
+      });
     }
     
     return insights;
@@ -171,6 +122,11 @@ export function Monitoring() {
             Steps
           </h2>
           <StepCounter onTotalChange={handleStepUpdate} />
+        </div>
+
+        {/* CGM Section */}
+        <div className="mb-6">
+          <CGMSection />
         </div>
 
         {/* Insights Section */}
