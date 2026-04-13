@@ -71,6 +71,9 @@ export function GoalTracker() {
   const isWeightLoss = goalProgress.goalWeight < goalProgress.startWeight;
   const directionText = isWeightLoss ? "Weight Loss" : "Weight Gain";
   const directionIcon = isWeightLoss ? "📉" : "📈";
+  
+  // Convert kg to lbs (1 kg = 2.20462 lbs)
+  const kgToLbs = (kg: number) => kg * 2.20462;
 
   return (
     <div className="space-y-6">
@@ -92,22 +95,22 @@ export function GoalTracker() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <p className="text-slate-400 text-sm mb-1">Current Weight</p>
-              <p className="text-2xl font-bold text-cyan-400">{goalProgress.currentWeight.toFixed(1)} kg</p>
+              <p className="text-2xl font-bold text-cyan-400">{kgToLbs(goalProgress.currentWeight).toFixed(1)} lbs</p>
             </div>
 
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <p className="text-slate-400 text-sm mb-1">Goal Weight</p>
-              <p className="text-2xl font-bold text-green-400">{goalProgress.goalWeight.toFixed(1)} kg</p>
+              <p className="text-2xl font-bold text-green-400">{kgToLbs(goalProgress.goalWeight).toFixed(1)} lbs</p>
             </div>
 
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <p className="text-slate-400 text-sm mb-1">Weight {isWeightLoss ? "Lost" : "Gained"}</p>
-              <p className="text-2xl font-bold text-blue-400">{Math.abs(goalProgress.weightLost).toFixed(1)} kg</p>
+              <p className="text-2xl font-bold text-blue-400">{kgToLbs(Math.abs(goalProgress.weightLost)).toFixed(1)} lbs</p>
             </div>
 
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <p className="text-slate-400 text-sm mb-1">To Go</p>
-              <p className="text-2xl font-bold text-yellow-400">{goalProgress.weightToGo.toFixed(1)} kg</p>
+              <p className="text-2xl font-bold text-yellow-400">{kgToLbs(goalProgress.weightToGo).toFixed(1)} lbs</p>
             </div>
           </div>
 
@@ -175,7 +178,7 @@ export function GoalTracker() {
           <div className="grid grid-cols-2 gap-4">
             <div className="p-4 rounded-lg bg-white/5 border border-white/10">
               <p className="text-slate-400 text-sm mb-2">Weekly Change</p>
-              <p className="text-3xl font-bold text-cyan-400">{goalProgress.weeklyWeightChangeRate.toFixed(2)} kg</p>
+              <p className="text-3xl font-bold text-cyan-400">{kgToLbs(goalProgress.weeklyWeightChangeRate).toFixed(2)} lbs</p>
               <p className="text-slate-400 text-xs mt-2">per week</p>
             </div>
 
@@ -204,7 +207,7 @@ export function GoalTracker() {
           {goalProgress.weeklyWeightChangeRate > 0 && isWeightLoss && (
             <div className="p-3 rounded-lg bg-blue-900/20 border border-blue-500/30">
               <p className="text-blue-400 font-semibold text-sm">📉 Steady Progress</p>
-              <p className="text-blue-300 text-xs mt-1">You're losing {Math.abs(goalProgress.weeklyWeightChangeRate).toFixed(2)} kg per week on average.</p>
+              <p className="text-blue-300 text-xs mt-1">You're losing {kgToLbs(Math.abs(goalProgress.weeklyWeightChangeRate)).toFixed(2)} lbs per week on average.</p>
             </div>
           )}
 
