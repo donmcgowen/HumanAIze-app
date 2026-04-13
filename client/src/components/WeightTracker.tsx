@@ -57,7 +57,7 @@ export function WeightTracker() {
   // Calculate weight change
   const currentWeight = entries.length > 0 ? entries[0].weightLbs : null;
   const startWeight = entries.length > 0 ? entries[entries.length - 1].weightLbs : null;
-  const weightChange = currentWeight && startWeight ? startWeight - currentWeight : 0;
+  const weightChange = currentWeight && startWeight ? currentWeight - startWeight : 0;
 
   return (
     <div className="space-y-6">
