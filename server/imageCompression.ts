@@ -15,14 +15,18 @@ export async function compressImage(buffer: Buffer, mimeType: string = "image/jp
     let quality = 80;
     let compressed = buffer;
 
-    // If already under 1MB, return as-is
+    // If already under 1MB, normalize orientation and return
     if (buffer.length <= MAX_SIZE_BYTES) {
-      return buffer;
+      return await sharp(buffer)
+        .rotate() // Normalize EXIF orientation
+        .jpeg({ quality: 90, progressive: true })
+        .toBuffer();
     }
 
     // Iteratively compress until under 1MB
     while (compressed.length > MAX_SIZE_BYTES && quality > 10) {
       compressed = await sharp(buffer)
+        .rotate() // Normalize EXIF orientation
         .resize(1920, 1080, {
           fit: "inside",
           withoutEnlargement: true,
@@ -36,6 +40,7 @@ export async function compressImage(buffer: Buffer, mimeType: string = "image/jp
     // If still too large, reduce dimensions
     if (compressed.length > MAX_SIZE_BYTES) {
       compressed = await sharp(buffer)
+        .rotate() // Normalize EXIF orientation
         .resize(1280, 720, {
           fit: "inside",
           withoutEnlargement: true,
@@ -47,6 +52,7 @@ export async function compressImage(buffer: Buffer, mimeType: string = "image/jp
     // Final fallback: aggressive compression
     if (compressed.length > MAX_SIZE_BYTES) {
       compressed = await sharp(buffer)
+        .rotate() // Normalize EXIF orientation
         .resize(800, 600, {
           fit: "inside",
           withoutEnlargement: true,

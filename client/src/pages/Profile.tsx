@@ -338,22 +338,6 @@ export function Profile() {
         </Card>
       )}
 
-      {/* Custom Maintenance Calories */}
-      <Card className="bg-slate-800 border-slate-700">
-        <CardHeader>
-          <CardTitle>Customize Maintenance Calories (optional)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Input
-            type="number"
-            placeholder="Enter custom maintenance calories"
-            value={customMaintenanceCalories}
-            onChange={(e) => setCustomMaintenanceCalories(e.target.value)}
-            className="bg-slate-900 border-white/10 text-white placeholder-slate-500"
-          />
-        </CardContent>
-      </Card>
-
       {/* Fitness Goal */}
       <Card className="bg-slate-800 border-slate-700">
         <CardHeader>

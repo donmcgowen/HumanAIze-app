@@ -23,7 +23,7 @@ function Router() {
     <Switch>
       <Route path={"/login"} component={Login} />
       <Route path={"/signup"} component={Signup} />
-      <Route path={"/ "} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
+      <Route path={"/"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
       <Route path={"/dashboard"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
       <Route path={"/history"} component={() => <DashboardLayout><History /></DashboardLayout>} />
       <Route path={"/sources"} component={() => <DashboardLayout><Sources /></DashboardLayout>} />

@@ -720,7 +720,23 @@ export async function getProgressPhotos(userId: number): Promise<ProgressPhoto[]
   }
 
   try {
-    return await db.select().from(progressPhotos).where(eq(progressPhotos.userId, userId)).orderBy((t) => desc(t.photoDate));
+    const { storageGet } = await import("./storage");
+    const photos = await db.select().from(progressPhotos).where(eq(progressPhotos.userId, userId)).orderBy((t) => desc(t.photoDate));
+    
+    // Generate SAS URLs for each photo
+    const photosWithUrls = await Promise.all(
+      photos.map(async (photo) => {
+        try {
+          const { url } = await storageGet(photo.photoKey);
+          return { ...photo, photoUrl: url };
+        } catch (error) {
+          console.error("[Storage] Error generating SAS URL for photo:", error);
+          return photo;
+        }
+      })
+    );
+    
+    return photosWithUrls;
   } catch (error) {
     console.error("[Database] Error fetching progress photos:", error);
     return [];

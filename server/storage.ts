@@ -72,18 +72,30 @@ export async function storagePut(
 }
 
 export async function storageGet(
-  relKey: string
+  relKey: string,
+  expiresInMs: number = 3600000
 ): Promise<{ key: string; url: string }> {
-  const { containerName, accountName } = getStorageConfig();
+  const { containerName, accountName, accountKey } = getStorageConfig();
   const key = normalizeKey(relKey);
 
   try {
+    const { generateBlobSASQueryParameters, BlobSASPermissions, StorageSharedKeyCredential } = await import("@azure/storage-blob");
+    
+    const sharedKeyCredential = new StorageSharedKeyCredential(accountName, accountKey);
+    
+    const sasOptions: any = {
+      containerName,
+      blobName: key,
+      permissions: BlobSASPermissions.parse("r"),
+      startsOn: new Date(),
+      expiresOn: new Date(new Date().valueOf() + expiresInMs),
+    };
+
+    const sasQueryParams = generateBlobSASQueryParameters(sasOptions, sharedKeyCredential);
     const blobServiceClient = getBlobServiceClient();
     const containerClient = blobServiceClient.getContainerClient(containerName);
     const blockBlobClient = containerClient.getBlockBlobClient(key);
-
-    // Generate SAS URL with 1 hour expiration for downloads
-    const url = blockBlobClient.url;
+    const url = `${blockBlobClient.url}?${sasQueryParams.toString()}`;
 
     return { key, url };
   } catch (error) {
