@@ -63,7 +63,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <Button
             className="mt-8 h-11 rounded-none border border-white/30 bg-white text-slate-950 hover:bg-cyan-100"
             onClick={() => {
-              window.location.href = getLoginUrl();
+              window.location.href = "/login";
             }}
           >
             Sign in to continue
