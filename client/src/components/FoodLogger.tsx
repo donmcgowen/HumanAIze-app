@@ -1,85 +1,57 @@
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Plus, Trash2, Search, Edit2, Check, X, Loader2, Star } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, Loader2, Star } from "lucide-react";
 import { useState, useMemo } from "react";
-import { BarcodeScanner } from "./BarcodeScanner";
-import { QuantitySelector } from "./QuantitySelector";
-import { SizeSelector } from "./SizeSelector";
-import { FoodInsights } from "./FoodInsights";
-import { AIFoodScanner } from "./AIFoodScanner";
-import { FavoriteFoods } from "./FavoriteFoods";
-import { MealTemplates } from "./MealTemplates";
+import { Input } from "@/components/ui/input";
 import { AddFoodModal } from "./AddFoodModal";
-
-interface USDAFoodResult {
-  fdcId: string;
-  description?: string;
-  foodName?: string;
-  calories: number;
-  protein?: number;
-  carbs?: number;
-  fat?: number;
-  proteinGrams?: number;
-  carbsGrams?: number;
-  fatGrams?: number;
-  servingSize: number | string;
-  servingUnit?: string;
-}
 
 type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
-const MEAL_TYPES: { value: MealType; label: string }[] = [
-  { value: "breakfast", label: "Breakfast" },
-  { value: "lunch", label: "Lunch" },
-  { value: "dinner", label: "Dinner" },
-  { value: "snack", label: "Snack" },
+const MEAL_SECTIONS: { value: MealType; label: string }[] = [
+  { value: "breakfast", label: "BREAKFAST" },
+  { value: "lunch", label: "LUNCH" },
+  { value: "dinner", label: "DINNER" },
+  { value: "snack", label: "SNACKS" },
 ];
+
+interface MacroCircleProps {
+  value: number;
+  label: string;
+  unit?: string;
+  color: string;
+  size?: "large" | "small";
+}
+
+function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCircleProps) {
+  const isLarge = size === "large";
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <div
+        className={`rounded-full border-4 flex flex-col items-center justify-center bg-white/5 ${
+          isLarge ? "w-28 h-28 border-white/20" : "w-16 h-16 border-white/15"
+        }`}
+      >
+        <span className={`font-bold leading-none ${isLarge ? "text-3xl" : "text-xl"}`} style={{ color }}>
+          {Math.round(value)}
+        </span>
+        {unit && <span className="text-xs text-slate-400 mt-0.5">{unit}</span>}
+      </div>
+      <span className={`font-semibold tracking-widest text-slate-300 ${isLarge ? "text-xs" : "text-[10px]"}`}>
+        {label}
+      </span>
+    </div>
+  );
+}
 
 export function FoodLogger() {
   const utils = trpc.useUtils();
-  // State declarations first
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [selectedFood, setSelectedFood] = useState<USDAFoodResult | null>(null);
-  const [quantity, setQuantity] = useState("");
-  const [quantityUnit, setQuantityUnit] = useState("grams");
-  const [mealType, setMealType] = useState<MealType>("breakfast");
+
+  // State
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
-  const [useManualEntry, setUseManualEntry] = useState(false);
-  const [manualFoodName, setManualFoodName] = useState("");
-  const [manualCalories, setManualCalories] = useState("");
-  const [manualProtein, setManualProtein] = useState("");
-  const [manualCarbs, setManualCarbs] = useState("");
-  const [manualFat, setManualFat] = useState("");
-  const [barcodeLoading, setBarcodeLoading] = useState(false);
-  // Variant detection state
-  const [showVariantSelector, setShowVariantSelector] = useState(false);
-  const [variantType, setVariantType] = useState<"quantity" | "size" | null>(null);
-  const [showAIScanner, setShowAIScanner] = useState(false);
-  const [showFavorites, setShowFavorites] = useState(false);
-  const [showMeals, setShowMeals] = useState(false);
   const [showAddFoodModal, setShowAddFoodModal] = useState(false);
-
-  // Fetch favorites to check which foods are favorited
-  const { data: favorites, refetch: refetchFavorites } = trpc.food.getFavorites.useQuery();
-  const addFavoriteMutation = trpc.food.addFavorite.useMutation({
-    onSuccess: () => {
-      refetchFavorites();
-      toast.success("Added to favorites");
-    },
-  });
-  const deleteFavoriteMutation = trpc.food.deleteFavorite.useMutation({
-    onSuccess: () => {
-      refetchFavorites();
-      toast.success("Removed from favorites");
-    },
-  });
+  const [activeMealType, setActiveMealType] = useState<MealType>("breakfast");
 
   // Queries
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
@@ -87,22 +59,15 @@ export function FoodLogger() {
     endOfDay: new Date(new Date().setHours(23, 59, 59, 999)).getTime(),
   });
 
-  // USDA search query
-  const { data: usdaResults, isLoading: isSearching } = trpc.food.searchUSDA.useQuery(
-    { query: searchQuery },
-    { enabled: searchQuery.length > 2 && !useManualEntry }
-  );
-
-  // Fetch user profile for daily goals
   const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
 
+  const { data: favorites, refetch: refetchFavorites } = trpc.food.getFavorites.useQuery();
+
   const toPositiveNumberOrNull = (value: unknown): number | null => {
-    if (typeof value === "number") {
-      return Number.isFinite(value) && value > 0 ? value : null;
-    }
+    if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
     if (typeof value === "string") {
       const parsed = Number(value);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -110,75 +75,20 @@ export function FoodLogger() {
     return null;
   };
 
-  const profileMacroTargets = {
-    calories: toPositiveNumberOrNull(userProfile?.dailyCalorieTarget),
-    protein: toPositiveNumberOrNull(userProfile?.dailyProteinTarget),
-    carbs: toPositiveNumberOrNull(userProfile?.dailyCarbsTarget),
-    fat: toPositiveNumberOrNull(userProfile?.dailyFatTarget),
-  };
-
   const targetTotals = {
-    calories: profileMacroTargets.calories ?? 0,
-    protein: profileMacroTargets.protein ?? 0,
-    carbs: profileMacroTargets.carbs ?? 0,
-    fat: profileMacroTargets.fat ?? 0,
+    calories: toPositiveNumberOrNull(userProfile?.dailyCalorieTarget) ?? 0,
+    protein: toPositiveNumberOrNull(userProfile?.dailyProteinTarget) ?? 0,
+    carbs: toPositiveNumberOrNull(userProfile?.dailyCarbsTarget) ?? 0,
+    fat: toPositiveNumberOrNull(userProfile?.dailyFatTarget) ?? 0,
   };
-
-  const hasAnyProfileTarget =
-    profileMacroTargets.calories !== null ||
-    profileMacroTargets.protein !== null ||
-    profileMacroTargets.carbs !== null ||
-    profileMacroTargets.fat !== null;
-
-  const missingMacroTargets: string[] = [];
-  if (profileMacroTargets.calories === null) missingMacroTargets.push("calories");
-  if (profileMacroTargets.protein === null) missingMacroTargets.push("protein");
-  if (profileMacroTargets.carbs === null) missingMacroTargets.push("carbs");
-  if (profileMacroTargets.fat === null) missingMacroTargets.push("fat");
-
-  // Fetch recently added foods
-  const { data: recentFoods } = trpc.food.getRecent.useQuery({ limit: 5 });
-
-  // Insights query - enable even without profile to show recommendations with default targets
-  const { data: insights, isLoading: insightsLoading } = trpc.food.generateInsights.useQuery(
-    {
-      foodLogs: (foodLogs || []).map(log => ({
-        foodName: log.foodName,
-        calories: log.calories,
-        proteinGrams: log.proteinGrams,
-        carbsGrams: log.carbsGrams,
-        fatGrams: log.fatGrams,
-        mealType: log.mealType as "breakfast" | "lunch" | "dinner" | "snack",
-      })),
-      dailyCalorieGoal: targetTotals.calories,
-      dailyProteinGoal: targetTotals.protein,
-      dailyCarbGoal: targetTotals.carbs,
-      dailyFatGoal: targetTotals.fat,
-      healthObjectives: ["balanced nutrition"],
-    },
-    { enabled: (foodLogs?.length || 0) > 0 }
-  );
 
   // Mutations
   const addFoodLog = trpc.food.addLog.useMutation({
     onSuccess: () => {
       refetch();
-      setSelectedFood(null);
-      setQuantity("");
-      setQuantityUnit("grams");
-      setSearchQuery("");
-      setUseManualEntry(false);
-      setManualFoodName("");
-      setManualCalories("");
-      setManualProtein("");
-      setManualCarbs("");
-      setManualFat("");
-      setMealType("breakfast");
       toast.success("Food logged successfully");
     },
-    onError: () => {
-      toast.error("Failed to log food");
-    },
+    onError: () => toast.error("Failed to log food"),
   });
 
   const deleteFoodLog = trpc.food.deleteLog.useMutation({
@@ -195,10 +105,47 @@ export function FoodLogger() {
       setEditValues({});
       toast.success("Food updated");
     },
-    onError: () => {
-      toast.error("Failed to update food");
-    },
+    onError: () => toast.error("Failed to update food"),
   });
+
+  const addFavoriteMutation = trpc.food.addFavorite.useMutation({
+    onSuccess: () => { refetchFavorites(); toast.success("Added to favorites"); },
+  });
+  const deleteFavoriteMutation = trpc.food.deleteFavorite.useMutation({
+    onSuccess: () => { refetchFavorites(); toast.success("Removed from favorites"); },
+  });
+
+  // Computed values
+  const dailyTotals = useMemo(() => {
+    if (!foodLogs) return { protein: 0, carbs: 0, fat: 0, calories: 0 };
+    return foodLogs.reduce(
+      (acc: any, log: any) => ({
+        protein: acc.protein + (log.proteinGrams || 0),
+        carbs: acc.carbs + (log.carbsGrams || 0),
+        fat: acc.fat + (log.fatGrams || 0),
+        calories: acc.calories + (log.calories || 0),
+      }),
+      { protein: 0, carbs: 0, fat: 0, calories: 0 }
+    );
+  }, [foodLogs]);
+
+  const foodsByMeal = useMemo(() => {
+    if (!foodLogs) return { breakfast: [], lunch: [], dinner: [], snack: [] };
+    const grouped: Record<MealType, any[]> = { breakfast: [], lunch: [], dinner: [], snack: [] };
+    (foodLogs as any[]).forEach((log: any) => {
+      const mt = (log.mealType || "breakfast") as MealType;
+      if (grouped[mt]) grouped[mt].push(log);
+    });
+    return grouped;
+  }, [foodLogs]);
+
+  const mealCalories = useMemo(() => {
+    const cal: Record<MealType, number> = { breakfast: 0, lunch: 0, dinner: 0, snack: 0 };
+    Object.entries(foodsByMeal).forEach(([mt, foods]) => {
+      cal[mt as MealType] = (foods as any[]).reduce((s: number, l: any) => s + (l.calories || 0), 0);
+    });
+    return cal;
+  }, [foodsByMeal]);
 
   // Handlers
   const handleEditStart = (log: any) => {
@@ -218,214 +165,8 @@ export function FoodLogger() {
   const handleEditSave = (logId: number) => {
     const values = editValues[logId];
     if (!values) return;
-    updateFoodLog.mutate({
-      foodLogId: logId,
-      ...values,
-    });
+    updateFoodLog.mutate({ foodLogId: logId, ...values });
   };
-
-  const handleEditCancel = () => {
-    setEditingId(null);
-    setEditValues({});
-  };
-
-  const handleAIFoodsRecognized = (foods: Array<{
-    name: string;
-    portionSize: string;
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-  }>) => {
-    if (foods.length === 0) return;
-    
-    // Use the first recognized food
-    const food = foods[0];
-    const f = food as any;
-    setSelectedFood({
-      fdcId: `ai-${Date.now()}`,
-      description: food.name,
-      calories: food.calories,
-      proteinGrams: f.proteinGrams || food.protein || 0,
-      carbsGrams: f.carbsGrams || food.carbs || 0,
-      fatGrams: f.fatGrams || food.fat || 0,
-      servingSize: 100,
-      servingUnit: "g",
-    });
-    setQuantity(food.portionSize);
-    setQuantityUnit("g");
-    setUseManualEntry(false);
-    setShowAIScanner(false);
-    toast.success(`Recognized: ${food.name}`);
-  };
-
-  const handleBarcodeScanned = async (barcode: string) => {
-    setBarcodeLoading(true);
-
-    const normalizeQuantityUnit = (unit?: string): string => {
-      const normalized = (unit || "").toLowerCase().trim();
-      if (["g", "gram", "grams"].includes(normalized)) return "grams";
-      if (["oz", "ounce", "ounces"].includes(normalized)) return "oz";
-      if (["lb", "lbs", "pound", "pounds"].includes(normalized)) return "lbs";
-      if (["cup", "cups"].includes(normalized)) return "cup";
-      if (["serving", "servings"].includes(normalized)) return "serving";
-      return "grams";
-    };
-
-    const parseServingSizeAmount = (servingSize?: string): number => {
-      if (!servingSize) return 100;
-      const match = servingSize.match(/(\d+(?:\.\d+)?)/);
-      if (!match) return 100;
-      const parsed = Number(match[1]);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 100;
-    };
-
-    try {
-      const product = await utils.food.lookupBarcode.fetch({ barcode });
-      if (product) {
-        const p = product as any;
-        const parsedServingAmount = parseServingSizeAmount(product.servingSize);
-        const normalizedUnit = normalizeQuantityUnit(product.servingUnit);
-
-        setSelectedFood({
-          fdcId: barcode,
-          description: product.name,
-          calories: product.calories,
-          proteinGrams: p.proteinGrams || product.protein || 0,
-          carbsGrams: p.carbsGrams || product.carbs || 0,
-          fatGrams: p.fatGrams || product.fat || 0,
-          servingSize: parsedServingAmount,
-          servingUnit: normalizedUnit,
-        });
-        setQuantity(String(parsedServingAmount));
-        setQuantityUnit(normalizedUnit);
-        setUseManualEntry(false);
-        toast.success(`Found: ${product.name}`);
-      } else {
-        toast.error("Product not found in database");
-      }
-    } catch (err) {
-      toast.error("Failed to lookup barcode");
-    } finally {
-      setBarcodeLoading(false);
-    }
-  };
-
-  // Convert quantity to grams
-  const getQuantityInGrams = (): number => {
-    const qty = parseFloat(quantity);
-    if (!qty || isNaN(qty)) return 0;
-
-    switch (quantityUnit) {
-      case "g":
-        return qty;
-      case "oz":
-        return qty * 28.35;
-      case "lbs":
-        return qty * 453.6;
-      case "cup":
-        // For dry cereals, 1 cup ≈ 30g (not 240g which is for liquids)
-        return qty * 30;
-      case "grams":
-      default:
-        return qty;
-    }
-  };
-
-  // Calculate macros for USDA food
-  const calculatedMacros = useMemo(() => {
-    if (useManualEntry) {
-      return {
-        protein: parseFloat(manualProtein) || 0,
-        carbs: parseFloat(manualCarbs) || 0,
-        fat: parseFloat(manualFat) || 0,
-        calories: parseInt(manualCalories) || 0,
-      };
-    }
-
-    if (selectedFood && quantity) {
-      const quantityInGrams = getQuantityInGrams();
-      const rawServingSize = typeof selectedFood.servingSize === 'string'
-        ? Number(selectedFood.servingSize)
-        : selectedFood.servingSize;
-      const servingSize = Number.isFinite(rawServingSize) && rawServingSize > 0 ? rawServingSize : 100;
-      const scale = quantityInGrams / servingSize;
-      return {
-        protein: (selectedFood.proteinGrams || selectedFood.protein || 0) * scale,
-        carbs: (selectedFood.carbsGrams || selectedFood.carbs || 0) * scale,
-        fat: (selectedFood.fatGrams || selectedFood.fat || 0) * scale,
-        calories: selectedFood.calories * scale,
-      };
-    }
-
-    return { protein: 0, carbs: 0, fat: 0, calories: 0 };
-  }, [selectedFood, quantity, quantityUnit, useManualEntry, manualProtein, manualCarbs, manualFat, manualCalories]);
-
-  // Calculate daily totals
-  const dailyTotals = useMemo(() => {
-    if (!foodLogs) return { protein: 0, carbs: 0, fat: 0, calories: 0 };
-    return foodLogs.reduce(
-      (acc: any, log: any) => ({
-        protein: acc.protein + (log.proteinGrams || 0),
-        carbs: acc.carbs + (log.carbsGrams || 0),
-        fat: acc.fat + (log.fatGrams || 0),
-        calories: acc.calories + (log.calories || 0),
-      }),
-      { protein: 0, carbs: 0, fat: 0, calories: 0 }
-    );
-  }, [foodLogs]);
-
-  const remainingTotals = useMemo(
-    () => ({
-      calories: Math.max(0, targetTotals.calories - dailyTotals.calories),
-      protein: Math.max(0, targetTotals.protein - dailyTotals.protein),
-      carbs: Math.max(0, targetTotals.carbs - dailyTotals.carbs),
-      fat: Math.max(0, targetTotals.fat - dailyTotals.fat),
-    }),
-    [dailyTotals, targetTotals]
-  );
-
-  // Group foods by meal type
-  const foodsByMeal = useMemo(() => {
-    if (!foodLogs) return { breakfast: [], lunch: [], dinner: [], snack: [] };
-    const grouped: Record<MealType, any[]> = {
-      breakfast: [],
-      lunch: [],
-      dinner: [],
-      snack: [],
-    };
-
-    (foodLogs as any[]).forEach((log: any) => {
-      const mealType = (log.mealType || "breakfast") as MealType;
-      if (grouped[mealType]) {
-        grouped[mealType].push(log);
-      }
-    });
-
-    return grouped;
-  }, [foodLogs]);
-
-  // Calculate macros per meal
-  const mealMacros = useMemo(() => {
-    const macros: Record<MealType, any> = {
-      breakfast: { protein: 0, carbs: 0, fat: 0, calories: 0 },
-      lunch: { protein: 0, carbs: 0, fat: 0, calories: 0 },
-      dinner: { protein: 0, carbs: 0, fat: 0, calories: 0 },
-      snack: { protein: 0, carbs: 0, fat: 0, calories: 0 },
-    };
-
-    Object.entries(foodsByMeal).forEach(([mealType, foods]: [string, any]) => {
-      (foods as any[]).forEach((log: any) => {
-        const mt = mealType as MealType;
-        macros[mt].protein += log.proteinGrams || 0;
-        macros[mt].carbs += log.carbsGrams || 0;
-        macros[mt].fat += log.fatGrams || 0;
-        macros[mt].calories += log.calories || 0;
-      });
-    });
-
-    return macros;
-  }, [foodsByMeal]);
 
   const handleAddFoodFromModal = (food: any) => {
     const sugarGrams = Number(food.sugarGrams || 0);
@@ -436,539 +177,198 @@ export function FoodLogger() {
       proteinGrams: Math.round(food.proteinGrams * 10) / 10,
       carbsGrams: Math.round(food.carbsGrams * 10) / 10,
       fatGrams: Math.round(food.fatGrams * 10) / 10,
-      mealType,
+      mealType: activeMealType,
       loggedAt: Date.now(),
       notes: sugarGrams > 0 ? `Sugar: ${Math.round(sugarGrams * 10) / 10}g` : undefined,
     });
-    toast.success(`Added ${food.foodName} to ${mealType}`);
+    toast.success(`Added ${food.foodName} to ${activeMealType}`);
   };
 
-  const handleAddFood = () => {
-    if (useManualEntry) {
-      if (!manualFoodName || !manualCalories) {
-        toast.error("Please enter food name and calories");
-        return;
-      }
-      addFoodLog.mutate({
-        foodName: manualFoodName,
-        servingSize: "custom",
-        calories: parseInt(manualCalories),
-        proteinGrams: parseFloat(manualProtein) || 0,
-        carbsGrams: parseFloat(manualCarbs) || 0,
-        fatGrams: parseFloat(manualFat) || 0,
-        mealType,
-        loggedAt: Date.now(),
-      });
-    } else {
-      if (!selectedFood || !quantity) {
-        toast.error("Please select a food and enter quantity");
-        return;
-      }
-      addFoodLog.mutate({
-        foodName: selectedFood.description || selectedFood.foodName || "Unknown Food",
-        servingSize: `${quantity}${quantityUnit}`,
-        calories: Math.round(calculatedMacros.calories),
-        proteinGrams: Math.round(calculatedMacros.protein * 10) / 10,
-        carbsGrams: Math.round(calculatedMacros.carbs * 10) / 10,
-        fatGrams: Math.round(calculatedMacros.fat * 10) / 10,
-        mealType,
-        loggedAt: Date.now(),
-      });
-    }
+  const openAddFood = (meal: MealType) => {
+    setActiveMealType(meal);
+    setShowAddFoodModal(true);
   };
 
-  const renderMealSection = (mealType: MealType, mealLabel: string) => {
-    const meals = foodsByMeal[mealType] || [];
-    const macros = mealMacros[mealType];
-
+  if (isLoading) {
     return (
-      <div key={mealType} className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h4 className="font-semibold text-white capitalize">{mealLabel}</h4>
-          <div className="text-xs text-slate-400">
-            {macros.calories.toFixed(0)} cal • {macros.protein.toFixed(1)}g P • {macros.carbs.toFixed(1)}g C • {macros.fat.toFixed(1)}g F
-          </div>
-        </div>
-
-        {meals.length > 0 ? (
-          <div className="space-y-2">
-            {meals.map((log: any) => (
-              <div key={log.id} className="flex items-center justify-between p-3 bg-white/5 rounded border border-white/10">
-                {editingId === log.id ? (
-                  <div className="flex-1 space-y-2">
-                    <Input
-                      value={editValues[log.id]?.foodName || ""}
-                      onChange={(e) =>
-                        setEditValues({
-                          ...editValues,
-                          [log.id]: { ...editValues[log.id], foodName: e.target.value },
-                        })
-                      }
-                      className="bg-white/10 border-white/20 text-sm"
-                    />
-                    <div className="grid grid-cols-4 gap-2">
-                      <Input
-                        type="number"
-                        placeholder="Calories"
-                        value={editValues[log.id]?.calories || ""}
-                        onChange={(e) =>
-                          setEditValues({
-                            ...editValues,
-                            [log.id]: { ...editValues[log.id], calories: parseInt(e.target.value) || 0 },
-                          })
-                        }
-                        className="bg-white/10 border-white/20 text-sm"
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Protein"
-                        value={editValues[log.id]?.proteinGrams || ""}
-                        onChange={(e) =>
-                          setEditValues({
-                            ...editValues,
-                            [log.id]: { ...editValues[log.id], proteinGrams: parseFloat(e.target.value) || 0 },
-                          })
-                        }
-                        className="bg-white/10 border-white/20 text-sm"
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Carbs"
-                        value={editValues[log.id]?.carbsGrams || ""}
-                        onChange={(e) =>
-                          setEditValues({
-                            ...editValues,
-                            [log.id]: { ...editValues[log.id], carbsGrams: parseFloat(e.target.value) || 0 },
-                          })
-                        }
-                        className="bg-white/10 border-white/20 text-sm"
-                      />
-                      <Input
-                        type="number"
-                        placeholder="Fat"
-                        value={editValues[log.id]?.fatGrams || ""}
-                        onChange={(e) =>
-                          setEditValues({
-                            ...editValues,
-                            [log.id]: { ...editValues[log.id], fatGrams: parseFloat(e.target.value) || 0 },
-                          })
-                        }
-                        className="bg-white/10 border-white/20 text-sm"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() => handleEditSave(log.id)}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button size="sm" onClick={handleEditCancel} variant="outline">
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex-1">
-                      <div className="font-medium text-white text-sm">{log.foodName}</div>
-                      <div className="text-xs text-slate-500">
-                        {log.calories} cal • {log.proteinGrams}g P • {log.carbsGrams}g C • {log.fatGrams}g F
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          const isFavorited = favorites?.some(fav => fav.foodName === log.foodName);
-                          if (isFavorited) {
-                            const fav = favorites?.find(f => f.foodName === log.foodName);
-                            if (fav) deleteFavoriteMutation.mutate({ favoriteFoodId: fav.id });
-                          } else {
-                            addFavoriteMutation.mutate({
-                              foodName: log.foodName,
-                              servingSize: log.servingSize || "1 serving",
-                              calories: log.calories,
-                              proteinGrams: log.proteinGrams,
-                              carbsGrams: log.carbsGrams,
-                              fatGrams: log.fatGrams,
-                            });
-                          }
-                        }}
-                        className={favorites?.some(fav => fav.foodName === log.foodName) ? "text-yellow-400 hover:text-yellow-300" : "text-slate-400 hover:text-yellow-400"}
-                      >
-                        <Star className="h-4 w-4" fill={favorites?.some(fav => fav.foodName === log.foodName) ? "currentColor" : "none"} />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleEditStart(log)}
-                        className="text-slate-400 hover:text-white"
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => deleteFoodLog.mutate({ foodLogId: log.id })}
-                        className="text-slate-400 hover:text-red-400"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-slate-500 italic">No foods logged</div>
-        )}
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
       </div>
     );
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Food Input Card */}
-      <Card className="border-white/10 bg-white/[0.03]">
-        <CardHeader>
-          <CardTitle>Log Food</CardTitle>
-          <CardDescription>Search USDA database or manually enter food and macros</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Add Food Button with Favorites and Meals */}
-          <div className="space-y-3">
-            <Button
-              onClick={() => setShowAddFoodModal(true)}
-              className="w-full bg-cyan-500 hover:bg-cyan-600 text-white"
-              size="lg"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Food
-            </Button>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowFavorites(!showFavorites)}
-                className={showFavorites ? "flex-1 bg-amber-600 hover:bg-amber-700 text-white border-amber-500" : "flex-1"}
-              >
-                Favorites
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowMeals(!showMeals)}
-                className={showMeals ? "flex-1 bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-500" : "flex-1"}
-              >
-            {/* Recently Added Foods Section - Hidden by default */}
-            {/* Removed to declutter the UI. Users can access recent foods through Favorites. */}
-                Meals
-              </Button>
+    <div className="space-y-4">
+      {/* ── Macro Summary ── */}
+      <div className="rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-white/10 p-6">
+        {/* Large circles: Calories + Protein */}
+        <div className="flex justify-center gap-8 mb-5">
+          <MacroCircle value={dailyTotals.calories} label="CALORIES" color="#4ade80" size="large" />
+          <MacroCircle value={dailyTotals.protein} label="PROTEIN" unit="g" color="#fb923c" size="large" />
+        </div>
+        {/* Small circles: Carbs, Fat */}
+        <div className="flex justify-center gap-6">
+          <MacroCircle value={dailyTotals.carbs} label="CARBS" unit="g" color="#94a3b8" size="small" />
+          <MacroCircle value={dailyTotals.fat} label="FAT" unit="g" color="#94a3b8" size="small" />
+        </div>
+        {/* Goal progress bar (if targets set) */}
+        {targetTotals.calories > 0 && (
+          <div className="mt-5 space-y-1">
+            <div className="flex justify-between text-xs text-slate-400">
+              <span>{Math.round(dailyTotals.calories)} cal logged</span>
+              <span>{Math.round(targetTotals.calories)} cal goal</span>
             </div>
-          </div>
-
-          {/* Add Food Modal */}
-          <AddFoodModal
-            isOpen={showAddFoodModal}
-            onClose={() => setShowAddFoodModal(false)}
-            onFoodAdded={handleAddFoodFromModal}
-            mealType={mealType}
-          />
-
-          {/* AI Food Scanner Modal */}
-          <AIFoodScanner
-            isOpen={showAIScanner}
-            onClose={() => setShowAIScanner(false)}
-            onFoodsRecognized={handleAIFoodsRecognized}
-          />
-
-
-          {/* Favorite Foods Section */}
-          {showFavorites && (
-            <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-              <FavoriteFoods
-                onSelectFood={(food) => {
-                  setSelectedFood({
-                    fdcId: food.id,
-                    description: food.foodName,
-                    foodName: food.foodName,
-                    calories: food.calories,
-                    proteinGrams: food.proteinGrams,
-                    carbsGrams: food.carbsGrams,
-                    fatGrams: food.fatGrams,
-                    servingSize: 1,
-                    servingUnit: "serving",
-                  });
-                  setQuantity("1");
-                  setQuantityUnit("serving");
-                  setShowFavorites(false);
-                }}
-                onQuickAdd={(food, amount, unit) => {
-                  addFoodLog.mutate({
-                    foodName: food.foodName,
-                    servingSize: `${amount}${unit}`,
-                    calories: Math.round(food.calories * amount),
-                    proteinGrams: Math.round(food.proteinGrams * amount * 10) / 10,
-                    carbsGrams: Math.round(food.carbsGrams * amount * 10) / 10,
-                    fatGrams: Math.round(food.fatGrams * amount * 10) / 10,
-                    mealType,
-                    loggedAt: Date.now(),
-                  });
-                  setShowFavorites(false);
+            <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min(100, (dailyTotals.calories / targetTotals.calories) * 100)}%`,
+                  background: dailyTotals.calories > targetTotals.calories ? "#ef4444" : "#22d3ee",
                 }}
               />
             </div>
-          )}
-
-          {/* Meal Templates Section */}
-          {showMeals && (
-            <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700">
-              <MealTemplates
-                currentMeals={(foodLogs || []).map(log => ({
-                  foodName: log.foodName,
-                  calories: log.calories,
-                  protein: log.proteinGrams,
-                  carbs: log.carbsGrams,
-                  fat: log.fatGrams,
-                }))}
-                onSelectMeal={(meal) => {
-                  setShowMeals(false);
-                }}
-              />
-            </div>
-          )}
-
-
-
-          {useManualEntry ? (
-            // Manual Entry Form
-            <div className="space-y-4">
-              <div>
-                <Label className="text-xs text-slate-400 mb-2 block">Food Name</Label>
-                <Input
-                  placeholder="e.g., Chicken Breast"
-                  value={manualFoodName}
-                  onChange={(e) => setManualFoodName(e.target.value)}
-                  className="bg-white/10 border-white/20"
-                />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                <div>
-                  <Label className="text-xs text-slate-400 mb-2 block">Calories</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={manualCalories}
-                    onChange={(e) => setManualCalories(e.target.value)}
-                    className="bg-white/10 border-white/20"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs text-slate-400 mb-2 block">Protein (g)</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={manualProtein}
-                    onChange={(e) => setManualProtein(e.target.value)}
-                    className="bg-white/10 border-white/20"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs text-slate-400 mb-2 block">Carbs (g)</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={manualCarbs}
-                    onChange={(e) => setManualCarbs(e.target.value)}
-                    className="bg-white/10 border-white/20"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs text-slate-400 mb-2 block">Fat (g)</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={manualFat}
-                    onChange={(e) => setManualFat(e.target.value)}
-                    className="bg-white/10 border-white/20"
-                  />
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {/* Auto-calculated Macros Display */}
-          {((selectedFood && quantity) || (useManualEntry && manualFoodName && manualCalories)) && (
-            <div className="bg-cyan-300/10 border border-cyan-300/30 rounded p-4 space-y-3">
-              <div className="text-sm font-semibold text-cyan-100">
-                {useManualEntry ? manualFoodName : selectedFood?.description}
-              </div>
-              <div className="grid grid-cols-4 gap-2 text-sm">
-                <div className="bg-white/5 p-2 rounded">
-                  <div className="text-xs text-slate-400">Protein</div>
-                  <div className="font-bold text-white">{calculatedMacros.protein.toFixed(1)}g</div>
-                </div>
-                <div className="bg-white/5 p-2 rounded">
-                  <div className="text-xs text-slate-400">Carbs</div>
-                  <div className="font-bold text-white">{calculatedMacros.carbs.toFixed(1)}g</div>
-                </div>
-                <div className="bg-white/5 p-2 rounded">
-                  <div className="text-xs text-slate-400">Fat</div>
-                  <div className="font-bold text-white">{calculatedMacros.fat.toFixed(1)}g</div>
-                </div>
-                <div className="bg-white/5 p-2 rounded">
-                  <div className="text-xs text-slate-400">Calories</div>
-                  <div className="font-bold text-white">{calculatedMacros.calories.toFixed(0)}</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-
-        </CardContent>
-      </Card>
-
-      {/* Daily Summary */}
-      <Card id="daily-targets" className="border-white/10 bg-white/[0.03]">
-        <CardHeader>
-          <CardTitle>Daily Totals</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-4 gap-3">
-            <div className="bg-white/5 p-3 rounded">
-              <div className="text-xs text-slate-400">Protein</div>
-              <div className="text-lg font-bold text-white">{dailyTotals.protein.toFixed(1)}g</div>
-            </div>
-            <div className="bg-white/5 p-3 rounded">
-              <div className="text-xs text-slate-400">Carbs</div>
-              <div className="text-lg font-bold text-white">{dailyTotals.carbs.toFixed(1)}g</div>
-            </div>
-            <div className="bg-white/5 p-3 rounded">
-              <div className="text-xs text-slate-400">Fat</div>
-              <div className="text-lg font-bold text-white">{dailyTotals.fat.toFixed(1)}g</div>
-            </div>
-            <div className="bg-white/5 p-3 rounded">
-              <div className="text-xs text-slate-400">Calories</div>
-              <div className="text-lg font-bold text-white">{dailyTotals.calories.toFixed(0)}</div>
-            </div>
           </div>
+        )}
+      </div>
 
-          <div className="bg-slate-900 p-4 rounded border border-white/10">
-            <p className="text-slate-300 font-semibold mb-3">Daily Targets</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-              <div>
-                <p className="text-slate-400 text-sm">Calories</p>
-                <p className="text-xl font-bold text-blue-400">{targetTotals.calories}</p>
-              </div>
-              <div>
-                <p className="text-slate-400 text-sm">Protein</p>
-                <p className="text-xl font-bold text-red-400">{targetTotals.protein}g</p>
-              </div>
-              <div>
-                <p className="text-slate-400 text-sm">Carbs</p>
-                <p className="text-xl font-bold text-yellow-400">{targetTotals.carbs}g</p>
-              </div>
-              <div>
-                <p className="text-slate-400 text-sm">Fat</p>
-                <p className="text-xl font-bold text-orange-400">{targetTotals.fat}g</p>
-              </div>
+      {/* ── Meal Sections ── */}
+      {MEAL_SECTIONS.map(({ value: meal, label }) => {
+        const foods = foodsByMeal[meal] || [];
+        const calories = mealCalories[meal];
+
+        return (
+          <div key={meal} className="rounded-xl bg-slate-800/60 border border-white/10 overflow-hidden">
+            {/* Section header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+              <span className="font-bold text-cyan-400 tracking-widest text-sm">{label}</span>
+              <span className="text-slate-400 text-sm font-medium">
+                {calories > 0 ? `${Math.round(calories)} Cal` : "0 Cal"}
+              </span>
             </div>
 
-            {!hasAnyProfileTarget && (
-              <p className="text-xs text-slate-500 mb-3">
-                No targets set. Save your profile to personalize your daily macro targets.
-              </p>
+            {/* Food items */}
+            {foods.length > 0 && (
+              <div className="divide-y divide-white/5">
+                {foods.map((log: any) => (
+                  <div key={log.id} className="px-4 py-3">
+                    {editingId === log.id ? (
+                      <div className="space-y-2">
+                        <Input
+                          value={editValues[log.id]?.foodName || ""}
+                          onChange={(e) =>
+                            setEditValues({ ...editValues, [log.id]: { ...editValues[log.id], foodName: e.target.value } })
+                          }
+                          className="bg-white/10 border-white/20 text-sm"
+                        />
+                        <div className="grid grid-cols-4 gap-2">
+                          {[
+                            { key: "calories", label: "Cal", parser: parseInt },
+                            { key: "proteinGrams", label: "Protein g", parser: parseFloat },
+                            { key: "carbsGrams", label: "Carbs g", parser: parseFloat },
+                            { key: "fatGrams", label: "Fat g", parser: parseFloat },
+                          ].map(({ key, label: lbl, parser }) => (
+                            <Input
+                              key={key}
+                              type="number"
+                              placeholder={lbl}
+                              value={editValues[log.id]?.[key] || ""}
+                              onChange={(e) =>
+                                setEditValues({ ...editValues, [log.id]: { ...editValues[log.id], [key]: parser(e.target.value) || 0 } })
+                              }
+                              className="bg-white/10 border-white/20 text-sm"
+                            />
+                          ))}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => handleEditSave(log.id)} className="bg-green-600 hover:bg-green-700">
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" onClick={() => { setEditingId(null); setEditValues({}); }} variant="outline">
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-white text-sm truncate">{log.foodName}</div>
+                          <div className="text-xs text-slate-500 mt-0.5">
+                            {log.calories} cal &bull; {log.proteinGrams}g P &bull; {log.carbsGrams}g C &bull; {log.fatGrams}g F
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 ml-2 shrink-0">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              const isFav = favorites?.some(f => f.foodName === log.foodName);
+                              if (isFav) {
+                                const fav = favorites?.find(f => f.foodName === log.foodName);
+                                if (fav) deleteFavoriteMutation.mutate({ favoriteFoodId: fav.id });
+                              } else {
+                                addFavoriteMutation.mutate({
+                                  foodName: log.foodName,
+                                  servingSize: log.servingSize || "1 serving",
+                                  calories: log.calories,
+                                  proteinGrams: log.proteinGrams,
+                                  carbsGrams: log.carbsGrams,
+                                  fatGrams: log.fatGrams,
+                                });
+                              }
+                            }}
+                            className={favorites?.some(f => f.foodName === log.foodName) ? "text-yellow-400 h-8 w-8 p-0" : "text-slate-500 hover:text-yellow-400 h-8 w-8 p-0"}
+                          >
+                            <Star className="h-3.5 w-3.5" fill={favorites?.some(f => f.foodName === log.foodName) ? "currentColor" : "none"} />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleEditStart(log)}
+                            className="text-slate-500 hover:text-white h-8 w-8 p-0"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => deleteFoodLog.mutate({ foodLogId: log.id })}
+                            className="text-slate-500 hover:text-red-400 h-8 w-8 p-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
 
-            {hasAnyProfileTarget && missingMacroTargets.length > 0 && (
-              <p className="text-xs text-slate-500 mb-3">
-                Some profile targets are missing ({missingMacroTargets.join(", ")}), so defaults are used for those only.
-              </p>
-            )}
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-white/10">
-              <div>
-                <p className="text-slate-400 text-sm">Remaining Calories</p>
-                <p className="text-lg font-semibold text-cyan-300">{remainingTotals.calories.toFixed(0)}</p>
-              </div>
-              <div>
-                <p className="text-slate-400 text-sm">Remaining Protein</p>
-                <p className="text-lg font-semibold text-cyan-300">{remainingTotals.protein.toFixed(1)}g</p>
-              </div>
-              <div>
-                <p className="text-slate-400 text-sm">Remaining Carbs</p>
-                <p className="text-lg font-semibold text-cyan-300">{remainingTotals.carbs.toFixed(1)}g</p>
-              </div>
-              <div>
-                <p className="text-slate-400 text-sm">Remaining Fat</p>
-                <p className="text-lg font-semibold text-cyan-300">{remainingTotals.fat.toFixed(1)}g</p>
-              </div>
+            {/* Action bar */}
+            <div className="grid grid-cols-2 border-t border-white/10">
+              <button
+                onClick={() => openAddFood(meal)}
+                className="flex items-center justify-center gap-2 py-3 text-sm font-semibold text-slate-300 hover:bg-white/5 transition-colors border-r border-white/10"
+              >
+                <span className="text-slate-400">✏</span> Add Food
+              </button>
+              <button
+                onClick={() => openAddFood(meal)}
+                className="flex items-center justify-center gap-2 py-3 text-sm font-bold text-white bg-cyan-700/60 hover:bg-cyan-600/70 transition-colors"
+              >
+                <Plus className="h-4 w-4" /> Add Food
+              </button>
             </div>
           </div>
-          
-          {/* Calorie Goal Progress Bar */}
-          {userProfile?.dailyCalorieTarget && (
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-medium text-slate-300">Calorie Goal</span>
-                <span className="text-sm text-slate-400">
-                  {dailyTotals.calories.toFixed(0)} / {userProfile.dailyCalorieTarget} kcal
-                </span>
-              </div>
-              {(() => {
-                const percentage = (dailyTotals.calories / userProfile.dailyCalorieTarget) * 100;
-                let barColor = "bg-emerald-500";
-                if (percentage >= 100) barColor = "bg-red-500";
-                else if (percentage >= 90) barColor = "bg-amber-500";
-                else if (percentage >= 75) barColor = "bg-yellow-500";
-                
-                return (
-                  <>
-                    <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
-                      <div
-                        className={`h-full ${barColor} transition-all duration-300`}
-                        style={{ width: `${Math.min(percentage, 100)}%` }}
-                      />
-                    </div>
-                    <div className="text-xs text-slate-400 text-center">
-                      {percentage.toFixed(0)}% • {(userProfile.dailyCalorieTarget - dailyTotals.calories).toFixed(0)} kcal remaining
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        );
+      })}
 
-      {/* Food Log by Meal Type */}
-      {foodLogs && foodLogs.length > 0 && (
-        <Card className="border-white/10 bg-white/[0.03]">
-          <CardHeader>
-            <CardTitle>Today's Foods</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {MEAL_TYPES.map((meal) => renderMealSection(meal.value, meal.label))}
-          </CardContent>
-        </Card>
-      )}
-      {/* Real-Time Insights */}
-      <FoodInsights
-        insights={insights || null}
-        isLoading={insightsLoading}
-        dailyCalorieGoal={targetTotals.calories}
-        currentCalories={dailyTotals.calories}
-        currentProtein={dailyTotals.protein}
-        dailyProteinGoal={targetTotals.protein}
-        currentCarbs={dailyTotals.carbs}
-        dailyCarbGoal={targetTotals.carbs}
-        currentFat={dailyTotals.fat}
-        dailyFatGoal={targetTotals.fat}
+      {/* Add Food Modal */}
+      <AddFoodModal
+        isOpen={showAddFoodModal}
+        onClose={() => setShowAddFoodModal(false)}
+        onFoodAdded={handleAddFoodFromModal}
+        mealType={activeMealType}
       />
     </div>
   );

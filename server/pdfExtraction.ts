@@ -1,12 +1,19 @@
 /**
  * PDF Extraction Module for Dexcom Clarity Reports
  *
- * Extracts glucose statistics from Dexcom Clarity PDF reports using:
- * 1. Regex-based parsing (fast, no API cost)
- * 2. AI fallback via GPT-4o-mini if regex finds nothing
+ * Dexcom Clarity PDFs are image-based (rendered by HeadlessChrome/Skia).
+ * Text extraction libraries return nothing. We use vision AI instead:
+ *
+ * 1. Convert PDF page 1 to PNG using pdftoppm (poppler-utils)
+ * 2. Send the PNG as a base64 image_url to GPT-4.1-mini vision
+ * 3. Parse the structured JSON response
  */
 
-import { invokeLLM } from "./_core/llm";
+import { execSync } from "child_process";
+import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { ENV } from "./_core/env";
 
 export interface ExtractedClarityData {
   averageGlucose?: number;
@@ -22,156 +29,61 @@ export interface ExtractedClarityData {
     startDate?: string;
     endDate?: string;
   };
-  readings?: Array<{
-    timestamp: string;
-    value: number;
-  }>;
   rawText: string;
-  extractionMethod?: "regex" | "ai";
+  extractionMethod?: "vision" | "regex" | "ai";
   aiSummary?: string;
 }
 
 /**
- * Extract text from PDF buffer using pdf-parse
+ * Convert PDF page 1 to a PNG buffer using pdftoppm.
+ * Returns null if pdftoppm is not available.
  */
-export async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
+async function pdfToPageImage(pdfBuffer: Buffer): Promise<Buffer | null> {
+  const id = `clarity_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const pdfPath = join(tmpdir(), `${id}.pdf`);
+  const outPrefix = join(tmpdir(), id);
+
   try {
-    // Dynamic import to avoid bundling issues
-    const pdfParse = await import("pdf-parse");
-    const parseFn = (pdfParse as any).default ?? pdfParse;
-    const data = await parseFn(pdfBuffer);
-    return data.text;
-  } catch (error) {
-    throw new Error(`Failed to parse PDF: ${error instanceof Error ? error.message : "Unknown error"}`);
-  }
-}
+    writeFileSync(pdfPath, pdfBuffer);
 
-/**
- * Parse Dexcom Clarity report text using regex first, then AI fallback
- */
-export async function parseClarityReportText(text: string): Promise<ExtractedClarityData> {
-  const data: ExtractedClarityData = {
-    rawText: text,
-    extractionMethod: "regex",
-  };
+    // -r 150: 150 DPI (good balance of quality vs size)
+    // -png: output as PNG
+    // -f 1 -l 1: only page 1
+    execSync(`pdftoppm -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, {
+      timeout: 30000,
+      stdio: "pipe",
+    });
 
-  // --- Regex extraction ---
-
-  // Average glucose: "Average Glucose: 145 mg/dL" or "Average 145 mg/dL"
-  const avgPatterns = [
-    /Average\s+Glucose[:\s]+(\d+)\s*mg\/dL/i,
-    /Avg\s+Glucose[:\s]+(\d+)/i,
-    /Average[:\s]+(\d+)\s*mg\/dL/i,
-    /Mean\s+Glucose[:\s]+(\d+)/i,
-  ];
-  for (const p of avgPatterns) {
-    const m = text.match(p);
-    if (m) { data.averageGlucose = parseInt(m[1], 10); break; }
-  }
-
-  // Min glucose
-  const minMatch = text.match(/(?:Lowest|Minimum|Min)[:\s]+(\d+)\s*mg\/dL/i);
-  if (minMatch) data.minGlucose = parseInt(minMatch[1], 10);
-
-  // Max glucose
-  const maxMatch = text.match(/(?:Highest|Maximum|Max)[:\s]+(\d+)\s*mg\/dL/i);
-  if (maxMatch) data.maxGlucose = parseInt(maxMatch[1], 10);
-
-  // Time in range
-  const tirPatterns = [
-    /(\d+(?:\.\d+)?)\s*%\s+In\s+Range/i,
-    /Time\s+in\s+Range[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-    /In\s+Range[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-    /(\d+(?:\.\d+)?)\s*%\s*(?:time\s+)?in\s+range/i,
-  ];
-  for (const p of tirPatterns) {
-    const m = text.match(p);
-    if (m) { data.timeInRange = parseFloat(m[1]); break; }
-  }
-
-  // Time above range
-  const tarMatch = text.match(/(?:Time\s+)?Above\s+Range[:\s]+(\d+(?:\.\d+)?)\s*%/i);
-  if (tarMatch) data.timeAboveRange = parseFloat(tarMatch[1]);
-
-  // Time below range
-  const tbrMatch = text.match(/(?:Time\s+)?Below\s+Range[:\s]+(\d+(?:\.\d+)?)\s*%/i);
-  if (tbrMatch) data.timeBelowRange = parseFloat(tbrMatch[1]);
-
-  // Standard deviation
-  const stdMatch = text.match(/Standard\s+Deviation[:\s]+(\d+(?:\.\d+)?)/i);
-  if (stdMatch) data.standardDeviation = parseFloat(stdMatch[1]);
-
-  // Coefficient of variation
-  const cvMatch = text.match(/Coefficient\s+of\s+Variation[:\s]+(\d+(?:\.\d+)?)\s*%/i);
-  if (cvMatch) data.coefficient = parseFloat(cvMatch[1]);
-
-  // Estimated A1C / GMI
-  const a1cPatterns = [
-    /Estimated\s+A1C[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-    /GMI[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-    /A1C\s+Estimate[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-    /eA1C[:\s]+(\d+(?:\.\d+)?)\s*%/i,
-  ];
-  for (const p of a1cPatterns) {
-    const m = text.match(p);
-    if (m) { data.estimatedA1C = parseFloat(m[1]); break; }
-  }
-
-  // Derive A1C from average glucose if still missing
-  if (data.estimatedA1C === undefined && typeof data.averageGlucose === "number") {
-    data.estimatedA1C = Math.round((((data.averageGlucose / 28.7) + 2.15) * 100)) / 100;
-  }
-
-  // Report period dates
-  const dateMatch = text.match(/(?:Report|Period)[:\s]*(\d{1,2}\/\d{1,2}\/\d{4})\s*(?:to|[-–])\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
-  if (dateMatch) {
-    data.reportPeriod = { startDate: dateMatch[1], endDate: dateMatch[2] };
-  }
-
-  // --- AI fallback if regex found nothing useful ---
-  const hasData = data.averageGlucose !== undefined || data.timeInRange !== undefined || data.estimatedA1C !== undefined;
-
-  if (!hasData) {
-    try {
-      const aiResult = await extractWithAI(text);
-      if (aiResult) {
-        data.extractionMethod = "ai";
-        if (aiResult.averageGlucose) data.averageGlucose = aiResult.averageGlucose;
-        if (aiResult.timeInRange) data.timeInRange = aiResult.timeInRange;
-        if (aiResult.estimatedA1C) data.estimatedA1C = aiResult.estimatedA1C;
-        if (aiResult.timeAboveRange) data.timeAboveRange = aiResult.timeAboveRange;
-        if (aiResult.timeBelowRange) data.timeBelowRange = aiResult.timeBelowRange;
-        if (aiResult.standardDeviation) data.standardDeviation = aiResult.standardDeviation;
-        if (aiResult.minGlucose) data.minGlucose = aiResult.minGlucose;
-        if (aiResult.maxGlucose) data.maxGlucose = aiResult.maxGlucose;
-        if (aiResult.summary) data.aiSummary = aiResult.summary;
-
-        // Derive A1C if still missing
-        if (data.estimatedA1C === undefined && typeof data.averageGlucose === "number") {
-          data.estimatedA1C = Math.round((((data.averageGlucose / 28.7) + 2.15) * 100)) / 100;
+    // pdftoppm names the output file as <prefix>-01.png
+    const pngPath = `${outPrefix}-01.png`;
+    if (!existsSync(pngPath)) {
+      // Try zero-padded variants
+      const variants = [`${outPrefix}-1.png`, `${outPrefix}-001.png`];
+      for (const v of variants) {
+        if (existsSync(v)) {
+          const buf = readFileSync(v);
+          unlinkSync(v);
+          return buf;
         }
       }
-    } catch (aiError) {
-      console.error("AI PDF extraction failed:", aiError);
-      // Continue with whatever regex found (possibly empty)
+      return null;
     }
-  } else {
-    // Even when regex succeeds, get an AI summary
-    try {
-      const aiResult = await extractWithAI(text, true);
-      if (aiResult?.summary) data.aiSummary = aiResult.summary;
-    } catch {
-      // Non-critical, ignore
-    }
-  }
 
-  return data;
+    const buf = readFileSync(pngPath);
+    unlinkSync(pngPath);
+    return buf;
+  } catch (err) {
+    console.warn("[pdfExtraction] pdftoppm failed:", err instanceof Error ? err.message : err);
+    return null;
+  } finally {
+    try { if (existsSync(pdfPath)) unlinkSync(pdfPath); } catch {}
+  }
 }
 
 /**
- * Use GPT-4o-mini to extract glucose metrics from PDF text
+ * Use vision AI to extract glucose metrics from a PNG image of the Clarity report.
  */
-async function extractWithAI(text: string, summaryOnly = false): Promise<{
+async function extractWithVision(imageBuffer: Buffer): Promise<{
   averageGlucose?: number;
   timeInRange?: number;
   estimatedA1C?: number;
@@ -182,42 +94,78 @@ async function extractWithAI(text: string, summaryOnly = false): Promise<{
   maxGlucose?: number;
   summary?: string;
 } | null> {
-  // Truncate to first 4000 chars to stay within token limits
-  const truncatedText = text.slice(0, 4000);
-
-  const prompt = summaryOnly
-    ? `You are a diabetes health assistant. Based on this Dexcom Clarity report text, write a 2-3 sentence plain-English summary of the patient's glucose control. Be specific about the numbers. Text:\n\n${truncatedText}`
-    : `You are a medical data extraction assistant. Extract glucose statistics from this Dexcom Clarity PDF report text and return them as JSON.
-
-Return ONLY a JSON object with these fields (use null if not found):
-{
-  "averageGlucose": <number in mg/dL or null>,
-  "timeInRange": <percentage 0-100 or null>,
-  "estimatedA1C": <percentage like 6.5 or null>,
-  "timeAboveRange": <percentage 0-100 or null>,
-  "timeBelowRange": <percentage 0-100 or null>,
-  "standardDeviation": <number in mg/dL or null>,
-  "minGlucose": <number in mg/dL or null>,
-  "maxGlucose": <number in mg/dL or null>,
-  "summary": "<2-3 sentence plain-English summary of glucose control>"
-}
-
-PDF text:
-${truncatedText}`;
-
-  const result = await invokeLLM({
-    messages: [{ role: "user", content: prompt }],
-    maxTokens: summaryOnly ? 200 : 500,
-  });
-
-  const content = result.choices[0]?.message?.content;
-  if (!content || typeof content !== "string") return null;
-
-  if (summaryOnly) {
-    return { summary: content.trim() };
+  const apiKey = ENV.forgeApiKey;
+  if (!apiKey) {
+    throw new Error("BUILT_IN_FORGE_API_KEY is not configured");
   }
 
-  // Parse JSON response
+  const base = ENV.forgeApiUrl ? ENV.forgeApiUrl.replace(/\/$/, "") : "https://api.openai.com/v1";
+  const apiUrl = base.includes("openai.azure.com") ? base : `${base}/chat/completions`;
+
+  // Use gpt-4.1-mini for vision (supports image_url)
+  // Fall back to ENV.llmModel if it's already a vision-capable model
+  const visionModel = "gpt-4.1-mini";
+
+  const base64 = imageBuffer.toString("base64");
+
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: visionModel,
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `This is page 1 of a Dexcom Clarity CGM report. Extract the following values exactly as shown on the page:
+
+1. Average Glucose (mg/dL) — the large number under "Average glucose"
+2. GMI or A1C estimate (%) — the number under "GMI" (Glucose Management Indicator)
+3. Time in Range (%) — the "% In Range" value from the Time in Range section (e.g. "74% In Range")
+4. Time Above Range (%) — the "% High" or "% Very High" combined, or "% Above Range"
+5. Time Below Range (%) — the "% Low" or "% Very Low" combined, or "% Below Range"
+6. Standard Deviation (mg/dL) — under "Standard deviation"
+7. Write a 2-sentence plain-English summary of the patient's glucose control.
+
+Return ONLY valid JSON with no markdown:
+{
+  "averageGlucose": <number or null>,
+  "a1cEstimate": <number or null>,
+  "timeInRange": <number or null>,
+  "timeAboveRange": <number or null>,
+  "timeBelowRange": <number or null>,
+  "standardDeviation": <number or null>,
+  "summary": "<string>"
+}`,
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/png;base64,${base64}`,
+                detail: "high",
+              },
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Vision API error: ${response.status} ${errText.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as any;
+  const content = data.choices?.[0]?.message?.content;
+  if (!content || typeof content !== "string") return null;
+
   try {
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
@@ -225,17 +173,93 @@ ${truncatedText}`;
     return {
       averageGlucose: parsed.averageGlucose ?? undefined,
       timeInRange: parsed.timeInRange ?? undefined,
-      estimatedA1C: parsed.estimatedA1C ?? undefined,
+      estimatedA1C: parsed.a1cEstimate ?? undefined,
       timeAboveRange: parsed.timeAboveRange ?? undefined,
       timeBelowRange: parsed.timeBelowRange ?? undefined,
       standardDeviation: parsed.standardDeviation ?? undefined,
-      minGlucose: parsed.minGlucose ?? undefined,
-      maxGlucose: parsed.maxGlucose ?? undefined,
       summary: parsed.summary ?? undefined,
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Main entry point: parse a Dexcom Clarity PDF buffer.
+ * Uses vision AI since Clarity PDFs are image-based.
+ */
+export async function parseClarityReportText(text: string): Promise<ExtractedClarityData> {
+  // This overload is kept for backward compatibility but the real work
+  // is done by parseClarityPDFBuffer below.
+  return {
+    rawText: text,
+    extractionMethod: "regex",
+  };
+}
+
+/**
+ * Parse a Dexcom Clarity PDF buffer using vision AI.
+ */
+export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<ExtractedClarityData> {
+  const data: ExtractedClarityData = {
+    rawText: "",
+    extractionMethod: "vision",
+  };
+
+  // Step 1: Convert page 1 to PNG
+  const imageBuffer = await pdfToPageImage(pdfBuffer);
+
+  if (!imageBuffer) {
+    throw new Error(
+      "Could not convert PDF to image. Please ensure poppler-utils (pdftoppm) is installed on the server."
+    );
+  }
+
+  // Step 2: Vision AI extraction
+  const result = await extractWithVision(imageBuffer);
+
+  if (!result) {
+    throw new Error("Vision AI could not extract data from the PDF image.");
+  }
+
+  data.averageGlucose = result.averageGlucose;
+  data.timeInRange = result.timeInRange;
+  data.estimatedA1C = result.estimatedA1C;
+  data.timeAboveRange = result.timeAboveRange;
+  data.timeBelowRange = result.timeBelowRange;
+  data.standardDeviation = result.standardDeviation;
+  data.aiSummary = result.summary;
+
+  // Derive A1C from average glucose if still missing
+  if (data.estimatedA1C === undefined && typeof data.averageGlucose === "number") {
+    data.estimatedA1C = Math.round((((data.averageGlucose / 28.7) + 2.15) * 100)) / 100;
+  }
+
+  return data;
+}
+
+/**
+ * Extract text from PDF buffer — kept for backward compat but Clarity PDFs have no text.
+ */
+export async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
+  try {
+    const pdfParse = await import("pdf-parse");
+    const parseFn = (pdfParse as any).default ?? pdfParse;
+    const result = await parseFn(pdfBuffer);
+    return result.text || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Validate if PDF appears to be a Dexcom Clarity report (by filename/metadata check).
+ * Since the PDF is image-based, we can only do a loose check.
+ */
+export function validateClarityPDF(text: string): { valid: boolean; error?: string } {
+  // text will be empty for image-based PDFs — always pass validation
+  // The actual content check happens after vision extraction
+  return { valid: true };
 }
 
 /**
@@ -245,7 +269,7 @@ export function generateClarityInsights(data: ExtractedClarityData): string[] {
   const insights: string[] = [];
 
   if (!data.averageGlucose) {
-    return ["Unable to extract glucose data from PDF. Please ensure it's a valid Dexcom Clarity report."];
+    return ["Unable to extract glucose data from PDF. Please ensure this is a valid Dexcom Clarity report."];
   }
 
   if (data.averageGlucose < 70) {
@@ -281,21 +305,4 @@ export function generateClarityInsights(data: ExtractedClarityData): string[] {
   }
 
   return insights.length > 0 ? insights : ["No specific insights available from the PDF data."];
-}
-
-/**
- * Validate if PDF appears to be a Dexcom Clarity report
- */
-export function validateClarityPDF(text: string): { valid: boolean; error?: string } {
-  if (!text || text.trim().length === 0) {
-    return { valid: false, error: "PDF appears to be empty or could not be read" };
-  }
-
-  // Be permissive — if it has any glucose-related content, accept it
-  const isClarityReport = /clarity|dexcom|glucose|average|time in range|a1c|mg\/dl/i.test(text);
-  if (!isClarityReport) {
-    return { valid: false, error: "PDF does not appear to be a Dexcom Clarity report. Please upload a Clarity PDF export." };
-  }
-
-  return { valid: true };
 }

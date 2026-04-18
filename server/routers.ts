@@ -30,7 +30,7 @@ import { lookupBarcodeProduct, getFoodVariant, getDefaultUnit } from "./barcode"
 import { generateFoodInsights, type DailyMacros } from "./insights";
 import { getMealSuggestions, getMealSuggestionsByCategory } from "@shared/mealSuggestions";
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
-import { extractTextFromPDF, parseClarityReportText, validateClarityPDF } from "./pdfExtraction";
+import { extractTextFromPDF, parseClarityReportText, parseClarityPDFBuffer, validateClarityPDF } from "./pdfExtraction";
 import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoAndVoice } from "./foodRecognition";
 
 import { storagePut } from "./storage";
@@ -422,17 +422,16 @@ export const appRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const pdfBuffer = Buffer.from(input.pdfBase64, "base64");
-        const text = await extractTextFromPDF(pdfBuffer);
-        const validation = validateClarityPDF(text);
 
-        if (!validation.valid) {
+        let extracted;
+        try {
+          extracted = await parseClarityPDFBuffer(pdfBuffer);
+        } catch (err) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: validation.error || "Invalid Dexcom Clarity PDF",
+            message: err instanceof Error ? err.message : "Failed to process PDF. Please ensure this is a Dexcom Clarity PDF export.",
           });
         }
-
-        const extracted = await parseClarityReportText(text);
 
         if (
           extracted.averageGlucose === undefined &&
