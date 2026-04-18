@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import * as pdfjsLib from "pdfjs-dist";
 
+// Use CDN worker to avoid Vite bundling issues with pdfjs-dist
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs`;
+
 interface ImportResult {
   success: boolean;
   importedCount: number;
