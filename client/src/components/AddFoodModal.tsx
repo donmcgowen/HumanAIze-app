@@ -1,10 +1,10 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useState, useEffect, useId, useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Search, FileText, Barcode, Loader2, AlertCircle } from "lucide-react";
+import { Search, FileText, Barcode, Loader2, AlertCircle, Clock } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { skipToken } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
@@ -99,13 +99,28 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Fetch recently logged foods for quick re-use
+  const { data: recentFoodLogs } = trpc.food.getRecent.useQuery({ limit: 10 });
+
+  // Deduplicate recent foods by name (keep most recent entry per food name)
+  const recentFoods = recentFoodLogs
+    ? Array.from(
+        new Map(
+          recentFoodLogs.map((f: any) => [f.foodName.toLowerCase(), f])
+        ).values()
+      ).slice(0, 8)
+    : [];
+
   const { data: foodVariations, isLoading, error } = trpc.food.searchWithAI.useQuery(
     { query: debouncedQuery },
     { enabled: debouncedQuery.trim().length > 2, retry: 1 }
   );
 
+  // When searching, mark which results match recent foods
+  const recentFoodNames = new Set(recentFoods.map((f: any) => f.foodName.toLowerCase()));
+
   const { data: calculatedMacros } = trpc.food.calculateServingMacros.useQuery(
-    selectedFood && servingAmount
+    selectedFood && !selectedFood.isRecentLog && servingAmount
       ? {
           foodName: selectedFood.name,
           caloriesPer100g: selectedFood.caloriesPer100g,
@@ -116,7 +131,7 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
           unit: servingUnit,
         }
       : skipToken,
-    { enabled: !!selectedFood && !!servingAmount }
+    { enabled: !!selectedFood && !selectedFood.isRecentLog && !!servingAmount }
   );
 
   const handleSelectFood = (food: any) => {
@@ -131,8 +146,40 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
     setServingUnit("g");
   };
 
+  const handleSelectRecentFood = (log: any) => {
+    setSelectedFood({
+      name: log.foodName,
+      description: `Recently logged • ${log.servingSize || "1 serving"}`,
+      caloriesPer100g: log.calories,
+      proteinPer100g: log.proteinGrams,
+      carbsPer100g: log.carbsGrams,
+      fatPer100g: log.fatGrams,
+      servingSize: log.servingSize || "100g",
+      isRecentLog: true,
+      originalCalories: log.calories,
+      originalProtein: log.proteinGrams,
+      originalCarbs: log.carbsGrams,
+      originalFat: log.fatGrams,
+      originalServingSize: log.servingSize,
+    });
+  };
+
   const handleAddFood = () => {
-    if (selectedFood && calculatedMacros) {
+    if (!selectedFood) return;
+    // For recently logged foods, use the original macros directly (same serving as last time)
+    if (selectedFood.isRecentLog) {
+      onFoodAdded({
+        foodName: selectedFood.name,
+        servingSize: selectedFood.originalServingSize || "1 serving",
+        calories: Math.round(selectedFood.originalCalories),
+        proteinGrams: Math.round(selectedFood.originalProtein * 10) / 10,
+        carbsGrams: Math.round(selectedFood.originalCarbs * 10) / 10,
+        fatGrams: Math.round(selectedFood.originalFat * 10) / 10,
+      });
+      onClose();
+      return;
+    }
+    if (calculatedMacros) {
       onFoodAdded({
         foodName: selectedFood.name,
         servingSize: `${servingAmount}${servingUnit}`,
@@ -147,11 +194,12 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
 
   return (
     <div className="space-y-4">
+      {/* Search input */}
       <div className="space-y-2">
         <Label htmlFor="search-food">Search Foods</Label>
         <Input
           id="search-food"
-          placeholder="e.g., protein bar, greek yogurt, chicken breast..."
+          placeholder="e.g., Premier Protein Cereal, greek yogurt..."
           value={searchQuery}
           onChange={(e) => { setSearchQuery(e.target.value); setSelectedFood(null); }}
           className="w-full"
@@ -159,11 +207,12 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
         />
         <p className="text-xs text-gray-500">
           {debouncedQuery.trim().length <= 2
-            ? "Type at least 3 characters to search"
-            : "Searching OpenFoodFacts first, then online sources for top matches..."}
+            ? "Type to search branded products, or pick a recent food below"
+            : "Searching branded products database..."}
         </p>
       </div>
 
+      {/* Loading state */}
       {isLoading && (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-5 w-5 animate-spin mr-2 text-cyan-400" />
@@ -171,6 +220,7 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
         </div>
       )}
 
+      {/* Error state */}
       {error && !isLoading && (
         <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-md text-red-400">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -178,94 +228,168 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
         </div>
       )}
 
+      {/* No results */}
       {!isLoading && !error && debouncedQuery.trim().length > 2 && foodVariations && foodVariations.length === 0 && !selectedFood && (
         <div className="text-center py-6 text-slate-400 text-sm">
           No results found for "{debouncedQuery}". Try a different term or use Manual entry.
         </div>
       )}
 
-      {foodVariations && foodVariations.length > 0 && !selectedFood && (
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {foodVariations.map((food: any, idx: number) => (
-            <Card
-              key={idx}
-              className="p-3 cursor-pointer transition-colors hover:bg-blue-50/50 border-gray-700 hover:border-blue-400"
-              onClick={() => handleSelectFood(food)}
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <p className="font-medium text-sm">{food.name}</p>
-                  <p className="text-xs text-gray-400">{food.description}</p>
+      {/* Recently used foods — shown when search box is empty and no food selected */}
+      {!selectedFood && debouncedQuery.trim().length <= 2 && recentFoods.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs text-gray-400 font-medium">
+            <Clock className="h-3.5 w-3.5" />
+            <span>Recently Used</span>
+          </div>
+          <div className="space-y-1.5 max-h-56 overflow-y-auto">
+            {recentFoods.map((log: any, idx: number) => (
+              <Card
+                key={idx}
+                className="p-2.5 cursor-pointer transition-colors hover:bg-cyan-50/10 border-gray-700 hover:border-cyan-500/50"
+                onClick={() => handleSelectRecentFood(log)}
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Clock className="h-3 w-3 text-cyan-400 flex-shrink-0" />
+                    <p className="font-medium text-sm truncate">{log.foodName}</p>
+                  </div>
+                  <div className="text-right text-xs ml-2 flex-shrink-0">
+                    <p className="font-semibold text-cyan-400">{Math.round(log.calories)} cal</p>
+                    <p className="text-gray-400">{log.proteinGrams}g P</p>
+                  </div>
                 </div>
-                <div className="text-right text-xs ml-2">
-                  <p className="font-semibold">{Math.round(food.caloriesPer100g)} cal/100g</p>
-                  <p className="text-gray-400">{food.proteinPer100g}g P</p>
-                </div>
-              </div>
-            </Card>
-          ))}
+                {log.servingSize && log.servingSize !== "custom" && (
+                  <p className="text-xs text-gray-500 ml-5 mt-0.5">{log.servingSize}</p>
+                )}
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* Search results list */}
+      {foodVariations && foodVariations.length > 0 && !selectedFood && (
+        <div className="space-y-2 max-h-64 overflow-y-auto">
+          {foodVariations.map((food: any, idx: number) => {
+            const isRecent = recentFoodNames.has(food.name.toLowerCase());
+            return (
+              <Card
+                key={idx}
+                className={`p-3 cursor-pointer transition-colors border-gray-700 ${
+                  isRecent
+                    ? "hover:bg-cyan-50/10 hover:border-cyan-500/50 border-cyan-800/40"
+                    : "hover:bg-blue-50/50 hover:border-blue-400"
+                }`}
+                onClick={() => handleSelectFood(food)}
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5">
+                      {isRecent && <Clock className="h-3 w-3 text-cyan-400 flex-shrink-0" />}
+                      <p className="font-medium text-sm">{food.name}</p>
+                    </div>
+                    <p className="text-xs text-gray-400">{food.description}</p>
+                  </div>
+                  <div className="text-right text-xs ml-2">
+                    <p className="font-semibold">{Math.round(food.caloriesPer100g)} cal/100g</p>
+                    <p className="text-gray-400">{food.proteinPer100g}g P</p>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Selected food detail / confirmation */}
       {selectedFood && (
         <div className="space-y-4 p-4 bg-blue-50/10 border border-blue-500/20 rounded-lg">
           <div>
-            <h4 className="font-semibold text-sm mb-1">{selectedFood.name}</h4>
-            <p className="text-xs text-gray-400">{selectedFood.description}</p>
-            {selectedFood.servingSize && (
-              <p className="text-xs text-gray-400 mt-1">Default serving: {selectedFood.servingSize}</p>
-            )}
+            <div className="flex items-center gap-1.5">
+              {selectedFood.isRecentLog && <Clock className="h-3.5 w-3.5 text-cyan-400" />}
+              <h4 className="font-semibold text-sm">{selectedFood.name}</h4>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">{selectedFood.description}</p>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <div className="space-y-1">
-              <Label htmlFor="serving-amount" className="text-xs">Amount</Label>
-              <Input
-                id="serving-amount"
-                type="number"
-                placeholder="100"
-                value={servingAmount}
-                onChange={(e) => setServingAmount(e.target.value)}
-                min="1"
-                step="0.1"
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="serving-unit" className="text-xs">Unit</Label>
-              <select
-                id="serving-unit"
-                value={servingUnit}
-                onChange={(e) => setServingUnit(e.target.value as "g" | "oz")}
-                className="w-full px-2 py-1 text-sm border border-gray-600 rounded bg-gray-800 text-white"
-              >
-                <option value="g">Grams (g)</option>
-                <option value="oz">Ounces (oz)</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Calories</Label>
-              <div className="px-2 py-1 text-sm font-semibold bg-gray-800 rounded">
-                {calculatedMacros?.calories || 0}
+          {selectedFood.isRecentLog ? (
+            /* Recently logged food: show exact macros from last log, no adjustment */
+            <div className="grid grid-cols-4 gap-2 text-xs">
+              <div className="p-2 bg-gray-800 rounded text-center">
+                <p className="text-gray-400">Calories</p>
+                <p className="font-semibold text-white">{Math.round(selectedFood.originalCalories)}</p>
               </div>
-            </div>
-          </div>
-
-          {calculatedMacros && (
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="p-2 bg-gray-800 rounded">
+              <div className="p-2 bg-gray-800 rounded text-center">
                 <p className="text-gray-400">Protein</p>
-                <p className="font-semibold">{calculatedMacros.protein}g</p>
+                <p className="font-semibold text-cyan-400">{selectedFood.originalProtein}g</p>
               </div>
-              <div className="p-2 bg-gray-800 rounded">
+              <div className="p-2 bg-gray-800 rounded text-center">
                 <p className="text-gray-400">Carbs</p>
-                <p className="font-semibold">{calculatedMacros.carbs}g</p>
+                <p className="font-semibold">{selectedFood.originalCarbs}g</p>
               </div>
-              <div className="p-2 bg-gray-800 rounded">
+              <div className="p-2 bg-gray-800 rounded text-center">
                 <p className="text-gray-400">Fat</p>
-                <p className="font-semibold">{calculatedMacros.fat}g</p>
+                <p className="font-semibold">{selectedFood.originalFat}g</p>
               </div>
             </div>
+          ) : (
+            /* Search result: allow serving size adjustment */
+            <>
+              {selectedFood.servingSize && (
+                <p className="text-xs text-gray-400">Default serving: {selectedFood.servingSize}</p>
+              )}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1">
+                  <Label htmlFor="serving-amount" className="text-xs">Amount</Label>
+                  <Input
+                    id="serving-amount"
+                    type="number"
+                    placeholder="100"
+                    value={servingAmount}
+                    onChange={(e) => setServingAmount(e.target.value)}
+                    min="1"
+                    step="0.1"
+                    className="text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="serving-unit" className="text-xs">Unit</Label>
+                  <select
+                    id="serving-unit"
+                    value={servingUnit}
+                    onChange={(e) => setServingUnit(e.target.value as "g" | "oz")}
+                    className="w-full px-2 py-1 text-sm border border-gray-600 rounded bg-gray-800 text-white"
+                  >
+                    <option value="g">Grams (g)</option>
+                    <option value="oz">Ounces (oz)</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Calories</Label>
+                  <div className="px-2 py-1 text-sm font-semibold bg-gray-800 rounded">
+                    {calculatedMacros?.calories || 0}
+                  </div>
+                </div>
+              </div>
+
+              {calculatedMacros && (
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="p-2 bg-gray-800 rounded">
+                    <p className="text-gray-400">Protein</p>
+                    <p className="font-semibold">{calculatedMacros.protein}g</p>
+                  </div>
+                  <div className="p-2 bg-gray-800 rounded">
+                    <p className="text-gray-400">Carbs</p>
+                    <p className="font-semibold">{calculatedMacros.carbs}g</p>
+                  </div>
+                  <div className="p-2 bg-gray-800 rounded">
+                    <p className="text-gray-400">Fat</p>
+                    <p className="font-semibold">{calculatedMacros.fat}g</p>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           <div className="flex gap-2 pt-2">
@@ -278,7 +402,7 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
             </Button>
             <Button
               onClick={handleAddFood}
-              disabled={!calculatedMacros}
+              disabled={!selectedFood.isRecentLog && !calculatedMacros}
               className="flex-1 bg-blue-600 hover:bg-blue-700"
             >
               Add Food
@@ -498,102 +622,89 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
           toast.error("Barcode lookup failed");
         }
       } finally {
-        if (isMounted) {
-          setLookupLoading(false);
-        }
-        if (scanner) {
-          await scanner.stop().catch(() => undefined);
-          scanner.clear();
-        }
+        if (isMounted) setLookupLoading(false);
       }
-    };
-
-    const onScanFailure = () => {
-      // Keep scanner quiet during normal frame misses.
     };
 
     const startScanner = async () => {
-      scanner = new Html5Qrcode(readerElementId, { verbose: false });
-      const scanConfig = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-      };
-
       try {
-        await scanner.start({ facingMode: "environment" }, scanConfig, onScanSuccess, onScanFailure);
-      } catch (_error) {
-        // Fallback for devices that don't expose an environment camera constraint.
-        try {
-          await scanner.start({ facingMode: "user" }, scanConfig, onScanSuccess, onScanFailure);
-        } catch (_fallbackError) {
-          if (isMounted) {
-            setScannerError("Unable to start camera scanner. Check camera permissions and reload.");
-            toast.error("Could not start camera scanner");
-          }
+        scanner = new Html5Qrcode(readerElementId);
+        await scanner.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 150 } },
+          onScanSuccess,
+          () => {}
+        );
+      } catch (err: any) {
+        if (isMounted) {
+          setScannerError(err?.message || "Camera access denied or not available.");
         }
       }
     };
 
-    void startScanner();
+    startScanner();
 
     return () => {
       isMounted = false;
       if (scanner) {
-        void scanner.stop().catch(() => undefined);
-        scanner.clear();
+        scanner.stop().catch(() => {});
       }
     };
-  }, [readerElementId, utils.food.lookupBarcode]);
+  }, [readerElementId]);
 
-  const handleUseUsdaResult = (food: any) => {
-    const servingSize = food.servingSize || "100g";
-    const servingUnit = food.servingUnit ? `${food.servingUnit}` : "";
-    setSelectedFood({
-      foodName: food.foodName || food.description || "USDA Food",
-      servingSize: `${servingSize}${servingUnit}`,
-      calories: Number(food.calories) || 0,
-      proteinGrams: Number(food.proteinGrams) || 0,
-      carbsGrams: Number(food.carbsGrams) || 0,
-      fatGrams: Number(food.fatGrams) || 0,
-      sugarGrams: Number((food as any).sugarGrams) || 0,
-      sourceLabel: "USDA FoodData Central",
-    });
-  };
-
-  const handleAddScannedFood = () => {
-    if (!selectedFood) return;
-    onFoodAdded({
-      foodName: selectedFood.foodName,
-      servingSize: selectedFood.servingSize,
-      calories: selectedFood.calories,
-      proteinGrams: selectedFood.proteinGrams,
-      carbsGrams: selectedFood.carbsGrams,
-      fatGrams: selectedFood.fatGrams,
-      sugarGrams: selectedFood.sugarGrams,
-    });
-    onClose();
-  };
+  if (selectedFood) {
+    return (
+      <div className="space-y-4">
+        <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+          <h4 className="font-semibold text-sm mb-1">{selectedFood.foodName}</h4>
+          <p className="text-xs text-gray-400 mb-3">{selectedFood.sourceLabel}</p>
+          <div className="grid grid-cols-4 gap-2 text-xs">
+            <div className="p-2 bg-gray-800 rounded text-center">
+              <p className="text-gray-400">Cal</p>
+              <p className="font-semibold">{selectedFood.calories}</p>
+            </div>
+            <div className="p-2 bg-gray-800 rounded text-center">
+              <p className="text-gray-400">Protein</p>
+              <p className="font-semibold">{selectedFood.proteinGrams}g</p>
+            </div>
+            <div className="p-2 bg-gray-800 rounded text-center">
+              <p className="text-gray-400">Carbs</p>
+              <p className="font-semibold">{selectedFood.carbsGrams}g</p>
+            </div>
+            <div className="p-2 bg-gray-800 rounded text-center">
+              <p className="text-gray-400">Fat</p>
+              <p className="font-semibold">{selectedFood.fatGrams}g</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setSelectedFood(null)} className="flex-1">
+            Back
+          </Button>
+          <Button
+            onClick={() => {
+              onFoodAdded({
+                foodName: selectedFood.foodName,
+                servingSize: selectedFood.servingSize,
+                calories: selectedFood.calories,
+                proteinGrams: selectedFood.proteinGrams,
+                carbsGrams: selectedFood.carbsGrams,
+                fatGrams: selectedFood.fatGrams,
+                sugarGrams: selectedFood.sugarGrams,
+              });
+              onClose();
+            }}
+            className="flex-1 bg-blue-600 hover:bg-blue-700"
+          >
+            Add Food
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div>
-        <h4 className="font-semibold">Barcode Scanner</h4>
-        <p className="text-xs text-slate-400">
-          Scan package barcode to fetch product data from Open Food Facts. If not found, use USDA search.
-        </p>
-      </div>
-
-      <div id={readerElementId} className="w-full overflow-hidden rounded-lg border border-slate-700" />
-
-      {lookupLoading && (
-        <div className="flex items-center gap-2 text-sm text-slate-300">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Looking up scanned barcode...
-        </div>
-      )}
-
-      {scanResult && <p className="text-xs text-slate-400">Last scanned barcode: {scanResult}</p>}
-
       {scannerError && (
         <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-md text-red-400">
           <AlertCircle className="h-4 w-4 flex-shrink-0" />
@@ -601,56 +712,69 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
         </div>
       )}
 
-      <div className="space-y-2 border-t border-slate-700 pt-4">
-        <Label htmlFor="usda-search">USDA fallback search</Label>
+      <div id={readerElementId} className="w-full rounded-lg overflow-hidden" />
+
+      {lookupLoading && (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="h-5 w-5 animate-spin mr-2 text-cyan-400" />
+          <span className="text-sm text-gray-400">Looking up product...</span>
+        </div>
+      )}
+
+      {scanResult && !lookupLoading && (
+        <p className="text-xs text-gray-400 text-center">Scanned: {scanResult}</p>
+      )}
+
+      <div className="border-t border-gray-700 pt-4">
+        <Label htmlFor="usda-search" className="text-sm font-medium mb-2 block">
+          Or search USDA database
+        </Label>
         <Input
           id="usda-search"
+          placeholder="Search by food name..."
           value={usdaQuery}
           onChange={(e) => setUsdaQuery(e.target.value)}
-          placeholder="Search USDA foods if barcode lookup fails"
         />
-        {usdaLoading && (
-          <div className="flex items-center gap-2 text-sm text-slate-300">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Searching USDA...
-          </div>
-        )}
-        {usdaResults && usdaResults.length > 0 && (
-          <div className="max-h-48 overflow-y-auto space-y-2 rounded border border-slate-700 p-2">
-            {usdaResults.map((food) => (
-              <button
-                key={food.fdcId}
-                type="button"
-                onClick={() => handleUseUsdaResult(food)}
-                className="w-full text-left p-2 rounded bg-slate-800/50 hover:bg-slate-700/50 transition-colors"
-              >
-                <p className="text-sm font-medium">{food.foodName}</p>
-                <p className="text-xs text-slate-400">
-                  {food.calories} cal | P {food.proteinGrams}g | C {food.carbsGrams}g | F {food.fatGrams}g | Sugar {(food as any).sugarGrams || 0}g
-                </p>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
-      {selectedFood && (
-        <div className="space-y-3 rounded-lg border border-cyan-500/30 bg-cyan-500/10 p-4">
-          <div>
-            <p className="text-sm font-semibold text-white">{selectedFood.foodName}</p>
-            <p className="text-xs text-cyan-300">Source: {selectedFood.sourceLabel}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div className="rounded bg-slate-900/60 p-2">Serving: {selectedFood.servingSize}</div>
-            <div className="rounded bg-slate-900/60 p-2">Calories: {selectedFood.calories}</div>
-            <div className="rounded bg-slate-900/60 p-2">Protein: {selectedFood.proteinGrams}g</div>
-            <div className="rounded bg-slate-900/60 p-2">Carbs: {selectedFood.carbsGrams}g</div>
-            <div className="rounded bg-slate-900/60 p-2">Fat: {selectedFood.fatGrams}g</div>
-            <div className="rounded bg-slate-900/60 p-2">Sugar: {selectedFood.sugarGrams}g</div>
-          </div>
-          <Button onClick={handleAddScannedFood} className="w-full bg-cyan-600 hover:bg-cyan-700">
-            Add Food
-          </Button>
+      {usdaLoading && (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="h-5 w-5 animate-spin mr-2 text-cyan-400" />
+          <span className="text-sm text-gray-400">Searching USDA...</span>
+        </div>
+      )}
+
+      {usdaResults && usdaResults.length > 0 && (
+        <div className="space-y-2 max-h-48 overflow-y-auto">
+          {usdaResults.map((food: any, idx: number) => (
+            <Card
+              key={idx}
+              className="p-3 cursor-pointer hover:bg-blue-50/50 border-gray-700 hover:border-blue-400"
+              onClick={() =>
+                setSelectedFood({
+                  foodName: food.foodName || food.description,
+                  servingSize: food.servingSize || "100g",
+                  calories: food.calories,
+                  proteinGrams: food.proteinGrams,
+                  carbsGrams: food.carbsGrams,
+                  fatGrams: food.fatGrams,
+                  sugarGrams: food.sugarGrams || 0,
+                  sourceLabel: `USDA FoodData Central`,
+                })
+              }
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <p className="font-medium text-sm">{food.foodName || food.description}</p>
+                  <p className="text-xs text-gray-400">{food.dataType}</p>
+                </div>
+                <div className="text-right text-xs ml-2">
+                  <p className="font-semibold">{food.calories} cal</p>
+                  <p className="text-gray-400">{food.proteinGrams}g P</p>
+                </div>
+              </div>
+            </Card>
+          ))}
         </div>
       )}
     </div>

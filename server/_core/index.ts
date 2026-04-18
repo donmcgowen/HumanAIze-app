@@ -30,6 +30,7 @@ import { serveStatic, setupVite } from "./vite";
 import { startBackgroundSync } from "../backgroundSync";
 import { getDatabaseHealth } from "../db";
 import { getAuthBackendHealth } from "../auth";
+import { clearGenericCacheEntries } from "../localFoodCache";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -109,6 +110,16 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
   });
+
+  // Clear stale generic USDA cache entries on startup so branded product searches work correctly
+  try {
+    const cleared = await clearGenericCacheEntries();
+    if (cleared > 0) {
+      console.log(`[Startup] Cleared ${cleared} stale generic food cache entries`);
+    }
+  } catch (error) {
+    console.warn("[Startup] Failed to clear generic food cache:", error);
+  }
 
   // Start background sync scheduler (every 5 minutes)
   try {

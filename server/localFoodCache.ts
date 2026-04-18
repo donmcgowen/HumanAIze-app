@@ -2,9 +2,11 @@ import { promises as fs } from "fs";
 import path from "path";
 
 const CACHE_FILE = path.join(process.cwd(), ".food-cache.json");
-const CACHE_TTL_DAYS = 90;
+// Branded/OFF results cached for 30 days; generic/SR Legacy cached for 7 days
+const BRANDED_CACHE_TTL_DAYS = 30;
+const GENERIC_CACHE_TTL_DAYS = 7;
 
-interface CachedFoodEntry {
+export interface CachedFoodEntry {
   name: string;
   description: string;
   caloriesPer100g: number;
@@ -19,6 +21,7 @@ interface CacheRecord {
   results: CachedFoodEntry[];
   cachedAt: number; // unix ms
   expiresAt: number; // unix ms
+  source?: string; // "branded", "open_food_facts", "gemini", "usda_generic"
 }
 
 type CacheStore = Record<string, CacheRecord>;
@@ -40,6 +43,20 @@ async function writeCache(store: CacheStore): Promise<void> {
   }
 }
 
+/**
+ * Returns true if the query looks like a branded product search
+ * (contains brand names, product names, or multiple words that suggest a specific product)
+ */
+function looksLikeBrandedQuery(query: string): boolean {
+  const q = query.toLowerCase().trim();
+  // Multi-word queries with brand-like terms are likely branded searches
+  const words = q.split(/\s+/);
+  if (words.length >= 2) return true;
+  // Single words that are clearly brand names (capitalized in original)
+  if (/^[A-Z]/.test(query.trim())) return true;
+  return false;
+}
+
 export async function getLocalCachedFood(query: string): Promise<CachedFoodEntry[] | null> {
   const store = await readCache();
   const key = query.toLowerCase().trim();
@@ -51,26 +68,60 @@ export async function getLocalCachedFood(query: string): Promise<CachedFoodEntry
     await writeCache(store);
     return null;
   }
-  console.log(`[LocalFoodCache] Cache hit for "${query}" (${record.results.length} results)`);
+
+  // If this looks like a branded query but the cached results are from generic USDA,
+  // skip the cache so we can search branded sources
+  if (looksLikeBrandedQuery(query) && record.source === "usda_generic") {
+    console.log(`[LocalFoodCache] Bypassing generic cache for branded query: "${query}"`);
+    delete store[key];
+    await writeCache(store);
+    return null;
+  }
+
+  console.log(`[LocalFoodCache] Cache hit for "${query}" (${record.results.length} results, source: ${record.source || "unknown"})`);
   return record.results;
 }
 
-export async function saveLocalCachedFood(query: string, results: CachedFoodEntry[]): Promise<void> {
+export async function saveLocalCachedFood(
+  query: string,
+  results: CachedFoodEntry[],
+  source: "branded" | "open_food_facts" | "gemini" | "usda_generic" = "usda_generic"
+): Promise<void> {
   const store = await readCache();
   const key = query.toLowerCase().trim();
   const now = Date.now();
+  const ttlDays = source === "usda_generic" ? GENERIC_CACHE_TTL_DAYS : BRANDED_CACHE_TTL_DAYS;
   store[key] = {
     query: key,
     results,
     cachedAt: now,
-    expiresAt: now + CACHE_TTL_DAYS * 24 * 60 * 60 * 1000,
+    expiresAt: now + ttlDays * 24 * 60 * 60 * 1000,
+    source,
   };
   await writeCache(store);
-  console.log(`[LocalFoodCache] Saved ${results.length} results for "${query}"`);
+  console.log(`[LocalFoodCache] Saved ${results.length} results for "${query}" (source: ${source}, TTL: ${ttlDays}d)`);
 }
 
 export async function clearLocalCachedFood(query: string): Promise<void> {
   const store = await readCache();
   delete store[query.toLowerCase().trim()];
   await writeCache(store);
+}
+
+/**
+ * Clear all cached entries that came from generic USDA sources.
+ * Call this to force re-search of branded products.
+ */
+export async function clearGenericCacheEntries(): Promise<number> {
+  const store = await readCache();
+  let cleared = 0;
+  for (const key of Object.keys(store)) {
+    if (!store[key].source || store[key].source === "usda_generic") {
+      delete store[key];
+      cleared++;
+    }
+  }
+  await writeCache(store);
+  console.log(`[LocalFoodCache] Cleared ${cleared} generic cache entries`);
+  return cleared;
 }

@@ -24,7 +24,7 @@ import {
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
 import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource } from "./db";
-import { searchUSDAFoods } from "./usda";
+import { searchUSDAFoods, searchUSDABrandedFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
 import { generateFoodInsights, type DailyMacros } from "./insights";
@@ -36,7 +36,7 @@ import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoA
 import { storagePut } from "./storage";
 import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnalysis";
 import { searchFoodWithGemini, calculateMacrosForServing } from "./geminiFood";
-import { getLocalCachedFood, saveLocalCachedFood } from "./localFoodCache";
+import { getLocalCachedFood, saveLocalCachedFood, clearGenericCacheEntries } from "./localFoodCache";
 import { searchOpenFoodFactsByName } from "./openFoodFacts";
 
 const rangeInput = z.object({
@@ -789,10 +789,20 @@ export const appRouter = router({
           return [];
         }
 
-        const mapUsdaResults = (usdaResults: Awaited<ReturnType<typeof searchUSDAFoods>>) =>
+        type FoodResult = {
+          name: string;
+          description: string;
+          caloriesPer100g: number;
+          proteinPer100g: number;
+          carbsPer100g: number;
+          fatPer100g: number;
+          servingSize?: string;
+        };
+
+        const mapUsdaResults = (usdaResults: Awaited<ReturnType<typeof searchUSDAFoods>>): FoodResult[] =>
           usdaResults.map((food) => ({
             name: food.foodName,
-            description: `${food.dataType}${food.description ? ` - ${food.description}` : ""}`,
+            description: food.brand ? `${food.brand} - ${food.dataType}` : food.dataType,
             caloriesPer100g: food.calories,
             proteinPer100g: food.proteinGrams,
             carbsPer100g: food.carbsGrams,
@@ -801,63 +811,97 @@ export const appRouter = router({
           }));
 
         // 1. Check local file cache first (fast, always available)
+        // Note: generic USDA cache entries are bypassed for branded-looking queries (handled in getLocalCachedFood)
         const localCached = await getLocalCachedFood(normalizedQuery);
         if (localCached && localCached.length > 0) {
           return localCached.slice(0, 10);
         }
 
-        // 2. Check DB cache if available
+        // 2. Check DB cache if available (skip for branded queries since DB may have stale generic results)
         const dbCached = await getCachedFoodSearchResults(normalizedQuery);
         if (dbCached.length > 0) {
-          console.log(`[Food Search] DB cache hit for query: "${normalizedQuery}" (${dbCached.length} results)`);
-          const mapped = dbCached.map(c => ({
-            name: c.foodName,
-            description: c.description || "",
-            caloriesPer100g: c.calories,
-            proteinPer100g: c.proteinGrams,
-            carbsPer100g: c.carbsGrams,
-            fatPer100g: c.fatGrams,
-            servingSize: c.servingSize || "100g",
-          })).slice(0, 10);
-          // Backfill local cache from DB results
-          await saveLocalCachedFood(normalizedQuery, mapped);
-          return mapped;
-        }
-
-        // 3. Cache miss — call Gemini API first, then fallback to USDA online search.
-        console.log(`[Food Search] Cache miss for query: "${normalizedQuery}" - calling Gemini API`);
-
-        let results: Array<{
-          name: string;
-          description: string;
-          caloriesPer100g: number;
-          proteinPer100g: number;
-          carbsPer100g: number;
-          fatPer100g: number;
-          servingSize?: string;
-        }> = [];
-        let resultSource: "open_food_facts" | "gemini" | "usda" = "gemini";
-
-        try {
-          const offResults = await searchOpenFoodFactsByName(normalizedQuery, 10);
-          if (offResults.length > 0) {
-            results = offResults.map((food) => ({
-              name: food.name,
-              description: food.description,
-              caloriesPer100g: food.caloriesPer100g,
-              proteinPer100g: food.proteinPer100g,
-              carbsPer100g: food.carbsPer100g,
-              fatPer100g: food.fatPer100g,
-              servingSize: food.servingSize || "100g",
-            }));
-            resultSource = "open_food_facts";
+          // Only use DB cache if results look like branded products (have real brand names)
+          const hasBrandedResults = dbCached.some(c => 
+            c.description && !c.description.includes("SR Legacy") && !c.description.includes("Survey (FNDDS)")
+          );
+          if (hasBrandedResults || dbCached.length >= 5) {
+            console.log(`[Food Search] DB cache hit for query: "${normalizedQuery}" (${dbCached.length} results)`);
+            const mapped = dbCached.map(c => ({
+              name: c.foodName,
+              description: c.description || "",
+              caloriesPer100g: c.calories,
+              proteinPer100g: c.proteinGrams,
+              carbsPer100g: c.carbsGrams,
+              fatPer100g: c.fatGrams,
+              servingSize: c.servingSize || "100g",
+            })).slice(0, 10);
+            await saveLocalCachedFood(normalizedQuery, mapped, "branded");
+            return mapped;
           }
-        } catch (error) {
-          console.warn(`[Food Search] Open Food Facts failed for query: "${normalizedQuery}"`, error);
         }
 
+        // 3. Cache miss — search USDA Branded + Open Food Facts IN PARALLEL (best sources for branded products)
+        console.log(`[Food Search] Cache miss for query: "${normalizedQuery}" - searching USDA Branded + Open Food Facts in parallel`);
+
+        let results: FoodResult[] = [];
+        let resultSource: "branded" | "open_food_facts" | "gemini" | "usda_generic" = "usda_generic";
+
+        // Run USDA Branded and Open Food Facts searches in parallel
+        const [usdaBrandedResults, offResults] = await Promise.allSettled([
+          searchUSDABrandedFoods(normalizedQuery, 15),
+          searchOpenFoodFactsByName(normalizedQuery, 15),
+        ]);
+
+        const brandedFoods = usdaBrandedResults.status === "fulfilled" ? usdaBrandedResults.value : [];
+        const offFoods = offResults.status === "fulfilled" ? offResults.value : [];
+
+        if (usdaBrandedResults.status === "rejected") {
+          console.warn(`[Food Search] USDA Branded failed for "${normalizedQuery}"`, usdaBrandedResults.reason);
+        }
+        if (offResults.status === "rejected") {
+          console.warn(`[Food Search] Open Food Facts failed for "${normalizedQuery}"`, offResults.reason);
+        }
+
+        // Merge results: interleave USDA Branded and OFF results, deduplicating by name
+        if (brandedFoods.length > 0 || offFoods.length > 0) {
+          const seen = new Set<string>();
+          const merged: FoodResult[] = [];
+
+          // Add USDA branded results first (they have serving size info)
+          for (const food of mapUsdaResults(brandedFoods)) {
+            const key = food.name.toLowerCase().trim();
+            if (!seen.has(key)) {
+              seen.add(key);
+              merged.push(food);
+            }
+          }
+
+          // Add OFF results (good for international/consumer brands)
+          for (const food of offFoods) {
+            const key = food.name.toLowerCase().trim();
+            if (!seen.has(key)) {
+              seen.add(key);
+              merged.push({
+                name: food.name,
+                description: food.description,
+                caloriesPer100g: food.caloriesPer100g,
+                proteinPer100g: food.proteinPer100g,
+                carbsPer100g: food.carbsPer100g,
+                fatPer100g: food.fatPer100g,
+                servingSize: food.servingSize || "100g",
+              });
+            }
+          }
+
+          results = merged.slice(0, 10);
+          resultSource = "branded";
+          console.log(`[Food Search] Branded search found ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length})`);
+        }
+
+        // 4. If no branded results, try Gemini AI
         if (results.length === 0) {
           try {
+            console.log(`[Food Search] No branded results — trying Gemini for "${normalizedQuery}"`);
             results = (await searchFoodWithGemini(normalizedQuery)).slice(0, 10);
             if (results.length > 0) {
               resultSource = "gemini";
@@ -867,18 +911,19 @@ export const appRouter = router({
           }
         }
 
+        // 5. Last resort: generic USDA search (all data types)
         if (results.length === 0) {
-          console.log(`[Food Search] Falling back to USDA for query: "${normalizedQuery}"`);
+          console.log(`[Food Search] Falling back to generic USDA for query: "${normalizedQuery}"`);
           const usdaResults = await searchUSDAFoods(normalizedQuery);
           results = mapUsdaResults(usdaResults).slice(0, 10);
           if (results.length > 0) {
-            resultSource = "usda";
+            resultSource = "usda_generic";
           }
         }
 
         if (results.length > 0) {
           // Save to local file cache (always works)
-          await saveLocalCachedFood(normalizedQuery, results);
+          await saveLocalCachedFood(normalizedQuery, results, resultSource);
 
           // Save to DB cache if available
           const cacheData = results.map(r => ({
