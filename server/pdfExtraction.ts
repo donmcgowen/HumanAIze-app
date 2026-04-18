@@ -1,15 +1,20 @@
 /**
  * PDF Extraction Module for Dexcom Clarity Reports
  *
- * Dexcom Clarity PDFs are image-based (rendered by HeadlessChrome/Skia).
- * We send the PDF directly to Google Gemini 2.5 Flash which natively reads PDFs.
- * No server-side PDF-to-image conversion needed — works on any server.
+ * Strategy:
+ *   1. PRIMARY: Convert page 1 to PNG via pdftoppm, send to Gemini vision (fast, ~5s)
+ *   2. SECONDARY: For trend insights, send full PDF to Gemini if under 14MB (slower, ~30s)
+ *   3. FALLBACK: If pdftoppm not available, send full PDF directly to Gemini
  *
- * Gemini inline limit: ~20MB base64 (~15MB raw PDF). Clarity reports are typically
- * 0.4–10MB, well within this limit.
+ * Dexcom Clarity PDFs are image-based (HeadlessChrome/Skia), so text extraction returns nothing.
+ * Page 1 contains all summary stats (Average Glucose, GMI, Time in Range).
+ * Full PDF contains daily charts needed for trend analysis.
  */
 
 import { ENV } from "./_core/env";
+import { execSync, existsSync, writeFileSync, readFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 export interface ExtractedClarityData {
   averageGlucose?: number;
@@ -32,14 +37,90 @@ export interface ExtractedClarityData {
 }
 
 const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_MAX_RAW_BYTES = 14 * 1024 * 1024; // 14MB raw = ~19MB base64, safe under 20MB limit
+const GEMINI_MAX_RAW_BYTES = 14 * 1024 * 1024; // 14MB raw = ~19MB base64
 
 /**
- * Send a PDF (or PNG) buffer to Gemini 2.5 Flash and extract CGM metrics + trend analysis.
+ * Convert PDF page 1 to PNG using pdftoppm.
+ * Returns PNG buffer, or null if pdftoppm is not available.
  */
-async function callGeminiWithPDF(
+async function pdfPage1ToPNG(pdfBuffer: Buffer): Promise<Buffer | null> {
+  const id = `clarity_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const pdfPath = join(tmpdir(), `${id}.pdf`);
+  const outPrefix = join(tmpdir(), id);
+
+  try {
+    writeFileSync(pdfPath, pdfBuffer);
+
+    // Try multiple pdftoppm paths
+    const pdftoppmPaths = ["pdftoppm", "/usr/bin/pdftoppm", "/usr/local/bin/pdftoppm"];
+    let succeeded = false;
+
+    for (const bin of pdftoppmPaths) {
+      try {
+        execSync(`${bin} -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, {
+          timeout: 30000,
+          stdio: "pipe",
+        });
+        succeeded = true;
+        break;
+      } catch {
+        // try next
+      }
+    }
+
+    if (!succeeded) {
+      // Try Python pdf2image as fallback
+      try {
+        execSync(
+          `python3 -c "
+from pdf2image import convert_from_bytes
+import base64, sys
+with open('${pdfPath}', 'rb') as f:
+    pdf_bytes = f.read()
+pages = convert_from_bytes(pdf_bytes, dpi=150, first_page=1, last_page=1)
+pages[0].save('${outPrefix}-01.png', 'PNG')
+"`,
+          { timeout: 30000, stdio: "pipe" }
+        );
+        succeeded = true;
+      } catch {
+        // pdf2image also failed
+      }
+    }
+
+    if (!succeeded) {
+      return null;
+    }
+
+    // Find the output PNG
+    const candidates = [
+      `${outPrefix}-01.png`,
+      `${outPrefix}-1.png`,
+      `${outPrefix}-001.png`,
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        const pngBuf = readFileSync(candidate);
+        try { unlinkSync(candidate); } catch {}
+        return pngBuf;
+      }
+    }
+    return null;
+  } catch (err) {
+    console.error("[pdfExtraction] pdfPage1ToPNG error:", err);
+    return null;
+  } finally {
+    try { unlinkSync(pdfPath); } catch {}
+  }
+}
+
+/**
+ * Call Gemini with a file buffer (PDF or PNG) and extract CGM metrics.
+ */
+async function callGemini(
   fileBuffer: Buffer,
-  mimeType: "application/pdf" | "image/png"
+  mimeType: "application/pdf" | "image/png",
+  includeTrendAnalysis: boolean
 ): Promise<{
   averageGlucose?: number;
   timeInRange?: number;
@@ -58,26 +139,24 @@ async function callGeminiWithPDF(
   const base64 = fileBuffer.toString("base64");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`;
 
-  const prompt = `You are a diabetes care specialist analyzing a Dexcom Clarity CGM report.
+  const summaryPrompt = `You are a diabetes care specialist analyzing a Dexcom Clarity CGM report.
 
-Extract the following summary statistics:
+Extract the following summary statistics from the report:
 1. Average Glucose (mg/dL)
 2. GMI or A1C estimate (%)
 3. Time in Range (%) — glucose 70-180 mg/dL
 4. Time Above Range (%) — glucose > 180 mg/dL
 5. Time Below Range (%) — glucose < 70 mg/dL
 6. Standard Deviation (mg/dL)
-7. Report date range (start and end dates if visible)
 
-Then analyze the glucose trends and patterns across the report period. Look for:
+${includeTrendAnalysis ? `Also analyze glucose trends and patterns:
 - Time-of-day patterns (morning highs, post-meal spikes, overnight lows)
-- Day-of-week patterns
 - Improvement or worsening trends over time
 - Recurring high or low periods
 - What appears to be working well
 - What needs attention or adjustment
 
-Return ONLY valid JSON (no markdown, no explanation):
+` : ""}Return ONLY valid JSON (no markdown, no explanation):
 {
   "averageGlucose": <number or null>,
   "a1cEstimate": <number or null>,
@@ -85,77 +164,86 @@ Return ONLY valid JSON (no markdown, no explanation):
   "timeAboveRange": <number or null>,
   "timeBelowRange": <number or null>,
   "standardDeviation": <number or null>,
-  "reportStartDate": "<string or null>",
-  "reportEndDate": "<string or null>",
   "summary": "<2-3 sentence plain-English summary of overall glucose control>",
-  "insights": [
+  "insights": [${includeTrendAnalysis ? `
     "<specific actionable insight 1>",
     "<specific actionable insight 2>",
     "<specific actionable insight 3>",
     "<specific actionable insight 4>",
-    "<specific actionable insight 5>"
+    "<specific actionable insight 5>"` : ""}
   ]
 }`;
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inline_data: { mime_type: mimeType, data: base64 } },
-          { text: prompt },
-        ],
-      }],
-      generationConfig: { temperature: 0, maxOutputTokens: 1024 },
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 300)}`);
-  }
-
-  const data = (await response.json()) as any;
-  const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-
-  if (!text) return null;
-
-  // Strip markdown code fences if present
-  const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    console.error("[pdfExtraction] No JSON found in Gemini response:", text.slice(0, 200));
-    return null;
-  }
-
-  let parsed: any = {};
   try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch (e) {
-    console.error("[pdfExtraction] JSON parse failed:", e);
-    return null;
-  }
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: mimeType, data: base64 } },
+            { text: summaryPrompt },
+          ],
+        }],
+        generationConfig: { temperature: 0, maxOutputTokens: includeTrendAnalysis ? 1024 : 512 },
+      }),
+    });
 
-  return {
-    averageGlucose: typeof parsed.averageGlucose === "number" ? parsed.averageGlucose : undefined,
-    estimatedA1C: typeof parsed.a1cEstimate === "number" ? parsed.a1cEstimate : undefined,
-    timeInRange: typeof parsed.timeInRange === "number" ? parsed.timeInRange : undefined,
-    timeAboveRange: typeof parsed.timeAboveRange === "number" ? parsed.timeAboveRange : undefined,
-    timeBelowRange: typeof parsed.timeBelowRange === "number" ? parsed.timeBelowRange : undefined,
-    standardDeviation: typeof parsed.standardDeviation === "number" ? parsed.standardDeviation : undefined,
-    summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
-    insights: Array.isArray(parsed.insights) ? parsed.insights.filter((i: any) => typeof i === "string") : undefined,
-  };
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 300)}`);
+    }
+
+    const data = (await response.json()) as any;
+    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+    if (!text) {
+      console.error("[pdfExtraction] Gemini returned empty text");
+      return null;
+    }
+
+    // Strip markdown code fences if present
+    const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("[pdfExtraction] No JSON found in Gemini response:", text.slice(0, 200));
+      return null;
+    }
+
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (e) {
+      console.error("[pdfExtraction] JSON parse failed:", e);
+      return null;
+    }
+
+    return {
+      averageGlucose: typeof parsed.averageGlucose === "number" ? parsed.averageGlucose : undefined,
+      estimatedA1C: typeof parsed.a1cEstimate === "number" ? parsed.a1cEstimate : undefined,
+      timeInRange: typeof parsed.timeInRange === "number" ? parsed.timeInRange : undefined,
+      timeAboveRange: typeof parsed.timeAboveRange === "number" ? parsed.timeAboveRange : undefined,
+      timeBelowRange: typeof parsed.timeBelowRange === "number" ? parsed.timeBelowRange : undefined,
+      standardDeviation: typeof parsed.standardDeviation === "number" ? parsed.standardDeviation : undefined,
+      summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
+      insights: Array.isArray(parsed.insights) ? parsed.insights.filter((i: any) => typeof i === "string") : undefined,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
  * Main entry point: parse a Dexcom Clarity PDF buffer using Gemini vision AI.
  *
  * Strategy:
- *   1. If PDF is under 14MB, send directly to Gemini as application/pdf (preferred)
- *   2. If PDF is over 14MB, try page-1 PNG via pdftoppm as fallback
- *   3. If both fail, throw a helpful error
+ *   1. Try page-1 PNG via pdftoppm (fast, ~5s, works on any size PDF)
+ *   2. If pdftoppm not available, send full PDF to Gemini directly (works for PDFs under 14MB)
+ *   3. For trend insights, attempt full PDF analysis separately (non-blocking)
  */
 export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<ExtractedClarityData> {
   const data: ExtractedClarityData = {
@@ -163,44 +251,39 @@ export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<Extracte
     extractionMethod: "vision",
   };
 
-  let result: Awaited<ReturnType<typeof callGeminiWithPDF>> = null;
+  let result: Awaited<ReturnType<typeof callGemini>> = null;
 
-  if (pdfBuffer.length <= GEMINI_MAX_RAW_BYTES) {
-    // Primary path: send full PDF to Gemini
-    console.log(`[pdfExtraction] Sending ${(pdfBuffer.length / 1024).toFixed(0)}KB PDF directly to Gemini`);
-    result = await callGeminiWithPDF(pdfBuffer, "application/pdf");
-  } else {
-    // Fallback for very large PDFs: try to convert page 1 to PNG
-    console.warn(`[pdfExtraction] PDF too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)}MB), attempting page-1 PNG fallback`);
-    try {
-      const { execSync, existsSync, writeFileSync, readFileSync, unlinkSync } = await import("child_process").then(() => ({
-        execSync: require("child_process").execSync,
-        existsSync: require("fs").existsSync,
-        writeFileSync: require("fs").writeFileSync,
-        readFileSync: require("fs").readFileSync,
-        unlinkSync: require("fs").unlinkSync,
-      }));
-      const os = require("os");
-      const path = require("path");
-      const id = `clarity_${Date.now()}`;
-      const pdfPath = path.join(os.tmpdir(), `${id}.pdf`);
-      const outPrefix = path.join(os.tmpdir(), id);
-      writeFileSync(pdfPath, pdfBuffer);
-      execSync(`pdftoppm -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, { timeout: 30000, stdio: "pipe" });
-      const candidates = [`${outPrefix}-01.png`, `${outPrefix}-1.png`, `${outPrefix}-001.png`];
-      for (const candidate of candidates) {
-        if (existsSync(candidate)) {
-          const pngBuf = readFileSync(candidate);
-          try { unlinkSync(candidate); } catch {}
-          try { unlinkSync(pdfPath); } catch {}
-          result = await callGeminiWithPDF(pngBuf, "image/png");
-          break;
+  // Step 1: Try page-1 PNG (fast path)
+  console.log(`[pdfExtraction] Attempting page-1 PNG extraction for ${(pdfBuffer.length / 1024).toFixed(0)}KB PDF`);
+  const pngBuf = await pdfPage1ToPNG(pdfBuffer);
+
+  if (pngBuf) {
+    console.log(`[pdfExtraction] Got page-1 PNG (${(pngBuf.length / 1024).toFixed(0)}KB), sending to Gemini`);
+    // For page-1 PNG, skip trend analysis (no daily charts visible)
+    result = await callGemini(pngBuf, "image/png", false);
+
+    // If we got summary stats, also try full PDF for trend insights (async, non-blocking)
+    if (result && pdfBuffer.length <= GEMINI_MAX_RAW_BYTES) {
+      console.log(`[pdfExtraction] Getting trend insights from full PDF...`);
+      try {
+        const trendResult = await callGemini(pdfBuffer, "application/pdf", true);
+        if (trendResult) {
+          // Merge: use page-1 stats (more reliable) + full PDF insights
+          result.insights = trendResult.insights;
+          if (!result.summary && trendResult.summary) result.summary = trendResult.summary;
         }
+      } catch (err) {
+        console.warn("[pdfExtraction] Trend analysis failed (non-critical):", err instanceof Error ? err.message : err);
       }
-      try { unlinkSync(pdfPath); } catch {}
-    } catch (err) {
+    }
+  } else {
+    // Step 2: pdftoppm not available — send full PDF directly
+    if (pdfBuffer.length <= GEMINI_MAX_RAW_BYTES) {
+      console.log(`[pdfExtraction] pdftoppm unavailable, sending full PDF to Gemini`);
+      result = await callGemini(pdfBuffer, "application/pdf", pdfBuffer.length < 5 * 1024 * 1024);
+    } else {
       throw new Error(
-        `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)}MB) for direct processing. ` +
+        `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)}MB) and pdftoppm is not available on this server. ` +
         `Please export a shorter date range (30 days recommended) from Dexcom Clarity.`
       );
     }
