@@ -38,6 +38,7 @@ interface PDFImportResult {
     maxGlucose: number | null;
   };
   aiSummary: string | null;
+  aiInsights?: string[];
 }
 
 export function ClarityCSVUpload() {
@@ -89,8 +90,8 @@ export function ClarityCSVUpload() {
       return;
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("File size must be less than 10MB");
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("File size must be less than 15MB");
       return;
     }
 
@@ -256,6 +257,24 @@ export function ClarityCSVUpload() {
                   <span className="text-sm font-medium">AI Summary</span>
                 </div>
                 <p className="text-sm text-slate-300">{pdfResult.aiSummary}</p>
+              </div>
+            )}
+
+            {/* AI Insights */}
+            {pdfResult.aiInsights && pdfResult.aiInsights.length > 0 && (
+              <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-purple-400 mb-2">
+                  <Brain className="h-4 w-4" />
+                  <span className="text-sm font-medium">Trend Insights</span>
+                </div>
+                <ul className="space-y-2">
+                  {pdfResult.aiInsights.map((insight, i) => (
+                    <li key={i} className="text-sm text-slate-300 flex items-start gap-2">
+                      <span className="text-purple-400 mt-0.5">•</span>
+                      <span>{insight}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
 

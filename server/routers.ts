@@ -450,7 +450,6 @@ export const appRouter = router({
           cgmTimeInRange: extracted.timeInRange,
           cgmA1cEstimate: extracted.estimatedA1C,
         });
-
         return {
           success: true,
           extractionMethod: extracted.extractionMethod ?? "regex",
@@ -465,6 +464,7 @@ export const appRouter = router({
             maxGlucose: extracted.maxGlucose ?? null,
           },
           aiSummary: extracted.aiSummary ?? null,
+          aiInsights: extracted.aiInsights ?? [],
         };
       }),
 
