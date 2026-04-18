@@ -32,6 +32,7 @@ import { getMealSuggestions, getMealSuggestionsByCategory } from "@shared/mealSu
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
 import { extractTextFromPDF, parseClarityReportText, parseClarityPDFBuffer, validateClarityPDF } from "./pdfExtraction";
 import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoAndVoice } from "./foodRecognition";
+import { analyzeMealPhotoWithGemini, scanProductLabel } from "./geminiMealScan";
 
 import { storagePut } from "./storage";
 import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnalysis";
@@ -665,6 +666,28 @@ export const appRouter = router({
         } catch (error) {
           console.error("[Food Recognition] Error:", error);
           throw error;
+        }
+      }),
+    // Gemini AI Food Scanner (product label OR meal plate)
+    analyzeMealPhoto: protectedProcedure
+      .input(
+        z.object({
+          imageBase64: z.string().min(1),
+          mimeType: z.string().default("image/jpeg"),
+          scanMode: z.enum(["meal", "product"]).default("meal"),
+        })
+      )
+      .mutation(async ({ input }) => {
+        try {
+          const result = input.scanMode === "product"
+            ? await scanProductLabel(input.imageBase64, input.mimeType)
+            : await analyzeMealPhotoWithGemini(input.imageBase64, input.mimeType);
+          return { success: true, ...result };
+        } catch (error) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: error instanceof Error ? error.message : "Failed to analyze photo.",
+          });
         }
       }),
     // Favorite Foods
