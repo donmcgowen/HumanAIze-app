@@ -2,20 +2,11 @@
  * PDF Extraction Module for Dexcom Clarity Reports
  *
  * Strategy:
- *   1. PRIMARY: Convert page 1 to PNG via pdftoppm, send to Gemini vision (fast, ~5s)
- *   2. SECONDARY: For trend insights, send full PDF to Gemini if under 14MB (slower, ~30s)
- *   3. FALLBACK: If pdftoppm not available, send full PDF directly to Gemini
- *
- * Dexcom Clarity PDFs are image-based (HeadlessChrome/Skia), so text extraction returns nothing.
- * Page 1 contains all summary stats (Average Glucose, GMI, Time in Range).
- * Full PDF contains daily charts needed for trend analysis.
+ *   Use Gemini File API to upload the PDF, wait for processing, and extract data.
+ *   This bypasses pdftoppm entirely and avoids Azure 502 timeouts for large PDFs.
  */
 
 import { ENV } from "./_core/env";
-import { execSync } from "child_process";
-import { existsSync, writeFileSync, readFileSync, unlinkSync } from "fs";
-import { tmpdir } from "os";
-import { join } from "path";
 
 export interface ExtractedClarityData {
   averageGlucose?: number;
@@ -38,109 +29,68 @@ export interface ExtractedClarityData {
 }
 
 const GEMINI_MODEL = "gemini-2.5-flash";
-const GEMINI_MAX_RAW_BYTES = 14 * 1024 * 1024; // 14MB raw = ~19MB base64
 
 /**
- * Convert PDF page 1 to PNG using pdftoppm.
- * Returns PNG buffer, or null if pdftoppm is not available.
+ * Main entry point: parse a Dexcom Clarity PDF buffer using Gemini File API.
  */
-async function pdfPage1ToPNG(pdfBuffer: Buffer): Promise<Buffer | null> {
-  const id = `clarity_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const pdfPath = join(tmpdir(), `${id}.pdf`);
-  const outPrefix = join(tmpdir(), id);
-
-  try {
-    writeFileSync(pdfPath, pdfBuffer);
-
-    // Try multiple pdftoppm paths
-    const pdftoppmPaths = ["pdftoppm", "/usr/bin/pdftoppm", "/usr/local/bin/pdftoppm"];
-    let succeeded = false;
-
-    for (const bin of pdftoppmPaths) {
-      try {
-        execSync(`${bin} -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, {
-          timeout: 30000,
-          stdio: "ignore",
-        });
-        succeeded = true;
-        break;
-      } catch {
-        // try next
-      }
-    }
-
-    if (!succeeded) {
-      // Try Python pdf2image as fallback
-      try {
-        execSync(
-          `python3 -c "
-from pdf2image import convert_from_bytes
-import base64, sys
-with open('${pdfPath}', 'rb') as f:
-    pdf_bytes = f.read()
-pages = convert_from_bytes(pdf_bytes, dpi=150, first_page=1, last_page=1)
-pages[0].save('${outPrefix}-01.png', 'PNG')
-"`,
-          { timeout: 30000, stdio: "ignore" }
-        );
-        succeeded = true;
-      } catch {
-        // pdf2image also failed
-      }
-    }
-
-    if (!succeeded) {
-      return null;
-    }
-
-    // Find the output PNG
-    const candidates = [
-      `${outPrefix}-01.png`,
-      `${outPrefix}-1.png`,
-      `${outPrefix}-001.png`,
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        const pngBuf = readFileSync(candidate);
-        try { unlinkSync(candidate); } catch {}
-        return pngBuf;
-      }
-    }
-    return null;
-  } catch (err) {
-    console.error("[pdfExtraction] pdfPage1ToPNG error:", err);
-    return null;
-  } finally {
-    try { unlinkSync(pdfPath); } catch {}
-  }
-}
-
-/**
- * Call Gemini with a file buffer (PDF or PNG) and extract CGM metrics.
- */
-async function callGemini(
-  fileBuffer: Buffer,
-  mimeType: "application/pdf" | "image/png",
-  includeTrendAnalysis: boolean
-): Promise<{
-  averageGlucose?: number;
-  timeInRange?: number;
-  timeAboveRange?: number;
-  timeBelowRange?: number;
-  estimatedA1C?: number;
-  standardDeviation?: number;
-  summary?: string;
-  insights?: string[];
-} | null> {
+export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<ExtractedClarityData> {
   const geminiKey = ENV.geminiApiKey;
   if (!geminiKey) {
     throw new Error("GEMINI_API_KEY is not configured on the server.");
   }
 
-  const base64 = fileBuffer.toString("base64");
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`;
+  const data: ExtractedClarityData = {
+    rawText: "",
+    extractionMethod: "ai",
+  };
 
-  const summaryPrompt = `You are a diabetes care specialist analyzing a Dexcom Clarity CGM report.
+  let fileName = "";
+  let fileUri = "";
+
+  try {
+    // 1. Upload to File API
+    console.log(`[pdfExtraction] Uploading ${(pdfBuffer.length / 1024 / 1024).toFixed(2)}MB PDF to Gemini File API...`);
+    const uploadRes = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${geminiKey}`, {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Protocol': 'raw',
+        'X-Goog-Upload-Command': 'start, upload',
+        'X-Goog-Upload-Header-Content-Length': pdfBuffer.length.toString(),
+        'X-Goog-Upload-Header-Content-Type': 'application/pdf',
+        'Content-Type': 'application/pdf',
+      },
+      body: new Uint8Array(pdfBuffer)
+    });
+
+    if (!uploadRes.ok) {
+      const errText = await uploadRes.text();
+      throw new Error(`Gemini File API upload failed: ${errText.slice(0, 300)}`);
+    }
+
+    const uploadData = await uploadRes.json();
+    fileName = uploadData.file.name;
+    fileUri = uploadData.file.uri;
+    console.log(`[pdfExtraction] Uploaded successfully: ${fileName}`);
+
+    // 2. Wait for processing
+    let state = uploadData.file.state;
+    let attempts = 0;
+    while (state === 'PROCESSING' && attempts < 15) { // Max 30 seconds wait
+      await new Promise(r => setTimeout(r, 2000));
+      const getRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${geminiKey}`);
+      if (!getRes.ok) break;
+      const getData = await getRes.json();
+      state = getData.state;
+      attempts++;
+    }
+
+    if (state !== 'ACTIVE') {
+      throw new Error(`Gemini File API processing failed or timed out. State: ${state}`);
+    }
+
+    // 3. Generate content
+    console.log(`[pdfExtraction] Generating content from ${fileName}...`);
+    const summaryPrompt = `You are a diabetes care specialist analyzing a Dexcom Clarity CGM report.
 
 Extract the following summary statistics from the report:
 1. Average Glucose (mg/dL)
@@ -150,14 +100,14 @@ Extract the following summary statistics from the report:
 5. Time Below Range (%) — glucose < 70 mg/dL
 6. Standard Deviation (mg/dL)
 
-${includeTrendAnalysis ? `Also analyze glucose trends and patterns:
+Also analyze glucose trends and patterns:
 - Time-of-day patterns (morning highs, post-meal spikes, overnight lows)
 - Improvement or worsening trends over time
 - Recurring high or low periods
 - What appears to be working well
 - What needs attention or adjustment
 
-` : ""}Return ONLY valid JSON (no markdown, no explanation):
+Return ONLY valid JSON (no markdown, no explanation):
 {
   "averageGlucose": <number or null>,
   "a1cEstimate": <number or null>,
@@ -166,141 +116,89 @@ ${includeTrendAnalysis ? `Also analyze glucose trends and patterns:
   "timeBelowRange": <number or null>,
   "standardDeviation": <number or null>,
   "summary": "<2-3 sentence plain-English summary of overall glucose control>",
-  "insights": [${includeTrendAnalysis ? `
+  "insights": [
     "<specific actionable insight 1>",
     "<specific actionable insight 2>",
-    "<specific actionable insight 3>",
-    "<specific actionable insight 4>",
-    "<specific actionable insight 5>"` : ""}
+    "<specific actionable insight 3>"
   ]
 }`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
+    const genRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contents: [{
           parts: [
-            { inline_data: { mime_type: mimeType, data: base64 } },
-            { text: summaryPrompt },
-          ],
+            { file_data: { mime_type: 'application/pdf', file_uri: fileUri } },
+            { text: summaryPrompt }
+          ]
         }],
-        generationConfig: { temperature: 0, maxOutputTokens: includeTrendAnalysis ? 1024 : 512 },
-      }),
+        generationConfig: { temperature: 0, maxOutputTokens: 1024 },
+      })
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Gemini API error ${response.status}: ${errText.slice(0, 300)}`);
+    if (!genRes.ok) {
+      const errText = await genRes.text();
+      throw new Error(`Gemini generateContent failed: ${errText.slice(0, 300)}`);
     }
 
-    const data = (await response.json()) as any;
-    const text: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    const genData = await genRes.json();
+    const text = genData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
     if (!text) {
-      console.error("[pdfExtraction] Gemini returned empty text");
-      return null;
+      throw new Error("Gemini returned empty text");
     }
 
     // Strip markdown code fences if present
     const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      console.error("[pdfExtraction] No JSON found in Gemini response:", text.slice(0, 200));
-      return null;
+      throw new Error(`No JSON found in Gemini response: ${text.slice(0, 200)}`);
     }
 
     let parsed: any = {};
     try {
       parsed = JSON.parse(jsonMatch[0]);
     } catch (e) {
-      console.error("[pdfExtraction] JSON parse failed:", e);
-      return null;
+      throw new Error(`JSON parse failed: ${e}`);
     }
 
-    return {
-      averageGlucose: typeof parsed.averageGlucose === "number" ? parsed.averageGlucose : undefined,
-      estimatedA1C: typeof parsed.a1cEstimate === "number" ? parsed.a1cEstimate : undefined,
-      timeInRange: typeof parsed.timeInRange === "number" ? parsed.timeInRange : undefined,
-      timeAboveRange: typeof parsed.timeAboveRange === "number" ? parsed.timeAboveRange : undefined,
-      timeBelowRange: typeof parsed.timeBelowRange === "number" ? parsed.timeBelowRange : undefined,
-      standardDeviation: typeof parsed.standardDeviation === "number" ? parsed.standardDeviation : undefined,
-      summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
-      insights: Array.isArray(parsed.insights) ? parsed.insights.filter((i: any) => typeof i === "string") : undefined,
-    };
+    data.averageGlucose = typeof parsed.averageGlucose === "number" ? parsed.averageGlucose : undefined;
+    data.estimatedA1C = typeof parsed.a1cEstimate === "number" ? parsed.a1cEstimate : undefined;
+    data.timeInRange = typeof parsed.timeInRange === "number" ? parsed.timeInRange : undefined;
+    data.timeAboveRange = typeof parsed.timeAboveRange === "number" ? parsed.timeAboveRange : undefined;
+    data.timeBelowRange = typeof parsed.timeBelowRange === "number" ? parsed.timeBelowRange : undefined;
+    data.standardDeviation = typeof parsed.standardDeviation === "number" ? parsed.standardDeviation : undefined;
+    data.aiSummary = typeof parsed.summary === "string" ? parsed.summary : undefined;
+    data.aiInsights = Array.isArray(parsed.insights) ? parsed.insights.filter((i: any) => typeof i === "string") : undefined;
+
+    if (!data.averageGlucose && !data.estimatedA1C && !data.timeInRange) {
+      throw new Error("No glucose readings found in this PDF. Please ensure it is a valid Dexcom Clarity report.");
+    }
+
+    // Derive A1C from average glucose if still missing
+    if (!data.estimatedA1C && typeof data.averageGlucose === "number") {
+      data.estimatedA1C = Math.round((((data.averageGlucose / 28.7) + 2.15) * 100)) / 100;
+    }
+
+    return data;
+
+  } catch (err: any) {
+    console.error("[pdfExtraction] Error:", err);
+    throw new Error(`Gemini could not extract data from this PDF: ${err.message}`);
   } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/**
- * Main entry point: parse a Dexcom Clarity PDF buffer using Gemini vision AI.
- *
- * Strategy:
- *   1. Try page-1 PNG via pdftoppm (fast, ~5s, works on any size PDF)
- *   2. If pdftoppm not available, send full PDF to Gemini directly (works for PDFs under 14MB)
- *   3. For trend insights, attempt full PDF analysis separately (non-blocking)
- */
-export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<ExtractedClarityData> {
-  const data: ExtractedClarityData = {
-    rawText: "",
-    extractionMethod: "vision",
-  };
-
-  let result: Awaited<ReturnType<typeof callGemini>> = null;
-
-  // Step 1: Try page-1 PNG (fast path)
-  console.log(`[pdfExtraction] Attempting page-1 PNG extraction for ${(pdfBuffer.length / 1024).toFixed(0)}KB PDF`);
-  const pngBuf = await pdfPage1ToPNG(pdfBuffer);
-
-  if (pngBuf) {
-    console.log(`[pdfExtraction] Got page-1 PNG (${(pngBuf.length / 1024).toFixed(0)}KB), sending to Gemini`);
-    // For page-1 PNG, skip trend analysis (no daily charts visible)
-    result = await callGemini(pngBuf, "image/png", false);
-
-    // Note: Full PDF trend analysis removed to avoid Azure timeout (230s limit).
-    // Page-1 PNG contains all summary stats needed.
-  } else {
-    // Step 2: pdftoppm not available — send full PDF directly
-    if (pdfBuffer.length <= GEMINI_MAX_RAW_BYTES) {
-      console.log(`[pdfExtraction] pdftoppm unavailable, sending full PDF to Gemini`);
-      result = await callGemini(pdfBuffer, "application/pdf", pdfBuffer.length < 5 * 1024 * 1024);
-    } else {
-      throw new Error(
-        `PDF is too large (${(pdfBuffer.length / 1024 / 1024).toFixed(1)}MB) and pdftoppm is not available on this server. ` +
-        `Please export a shorter date range (30 days recommended) from Dexcom Clarity.`
-      );
+    // 4. Clean up file
+    if (fileName) {
+      try {
+        console.log(`[pdfExtraction] Deleting file ${fileName}...`);
+        await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${geminiKey}`, {
+          method: 'DELETE'
+        });
+      } catch (e) {
+        console.error(`[pdfExtraction] Failed to delete file ${fileName}:`, e);
+      }
     }
   }
-
-  if (!result) {
-    throw new Error("Gemini could not extract data from this PDF. Please ensure it is a valid Dexcom Clarity report.");
-  }
-
-  if (!result.averageGlucose && !result.estimatedA1C && !result.timeInRange) {
-    throw new Error("No glucose readings found in this PDF. Please ensure it is a valid Dexcom Clarity report.");
-  }
-
-  data.averageGlucose = result.averageGlucose;
-  data.timeInRange = result.timeInRange;
-  data.timeAboveRange = result.timeAboveRange;
-  data.timeBelowRange = result.timeBelowRange;
-  data.estimatedA1C = result.estimatedA1C;
-  data.standardDeviation = result.standardDeviation;
-  data.aiSummary = result.summary;
-  data.aiInsights = result.insights;
-
-  // Derive A1C from average glucose if still missing
-  if (!data.estimatedA1C && typeof data.averageGlucose === "number") {
-    data.estimatedA1C = Math.round((((data.averageGlucose / 28.7) + 2.15) * 100)) / 100;
-  }
-
-  return data;
 }
 
 /**
