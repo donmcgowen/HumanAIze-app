@@ -12,7 +12,8 @@
  */
 
 import { ENV } from "./_core/env";
-import { execSync, existsSync, writeFileSync, readFileSync, unlinkSync } from "fs";
+import { execSync } from "child_process";
+import { existsSync, writeFileSync, readFileSync, unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
