@@ -29,13 +29,13 @@ function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCi
     <div className="flex flex-col items-center gap-1">
       <div
         className={`rounded-full border-4 flex flex-col items-center justify-center bg-white/5 ${
-          isLarge ? "w-28 h-28 border-white/20" : "w-16 h-16 border-white/15"
+          isLarge ? "w-32 h-32 border-white/20" : "w-[68px] h-[68px] border-white/15"
         }`}
       >
-        <span className={`font-bold leading-none ${isLarge ? "text-3xl" : "text-xl"}`} style={{ color }}>
+        <span className={`font-bold leading-none ${isLarge ? "text-4xl" : "text-xl"}`} style={{ color }}>
           {Math.round(value)}
         </span>
-        {unit && <span className="text-xs text-slate-400 mt-0.5">{unit}</span>}
+        {unit && <span className={`text-slate-400 mt-0.5 ${isLarge ? "text-sm" : "text-xs"}`}>{unit}</span>}
       </div>
       <span className={`font-semibold tracking-widest text-slate-300 ${isLarge ? "text-xs" : "text-[10px]"}`}>
         {label}
@@ -45,8 +45,6 @@ function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCi
 }
 
 export function FoodLogger() {
-  const utils = trpc.useUtils();
-
   // State
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
@@ -75,27 +73,16 @@ export function FoodLogger() {
     return null;
   };
 
-  const targetTotals = {
-    calories: toPositiveNumberOrNull(userProfile?.dailyCalorieTarget) ?? 0,
-    protein: toPositiveNumberOrNull(userProfile?.dailyProteinTarget) ?? 0,
-    carbs: toPositiveNumberOrNull(userProfile?.dailyCarbsTarget) ?? 0,
-    fat: toPositiveNumberOrNull(userProfile?.dailyFatTarget) ?? 0,
-  };
+  const targetCalories = toPositiveNumberOrNull(userProfile?.dailyCalorieTarget) ?? 0;
 
   // Mutations
   const addFoodLog = trpc.food.addLog.useMutation({
-    onSuccess: () => {
-      refetch();
-      toast.success("Food logged successfully");
-    },
+    onSuccess: () => { refetch(); toast.success("Food logged successfully"); },
     onError: () => toast.error("Failed to log food"),
   });
 
   const deleteFoodLog = trpc.food.deleteLog.useMutation({
-    onSuccess: () => {
-      refetch();
-      toast.success("Food removed");
-    },
+    onSuccess: () => { refetch(); toast.success("Food removed"); },
   });
 
   const updateFoodLog = trpc.food.updateLog.useMutation({
@@ -117,15 +104,24 @@ export function FoodLogger() {
 
   // Computed values
   const dailyTotals = useMemo(() => {
-    if (!foodLogs) return { protein: 0, carbs: 0, fat: 0, calories: 0 };
+    if (!foodLogs) return { protein: 0, carbs: 0, fat: 0, calories: 0, sugar: 0 };
     return foodLogs.reduce(
-      (acc: any, log: any) => ({
-        protein: acc.protein + (log.proteinGrams || 0),
-        carbs: acc.carbs + (log.carbsGrams || 0),
-        fat: acc.fat + (log.fatGrams || 0),
-        calories: acc.calories + (log.calories || 0),
-      }),
-      { protein: 0, carbs: 0, fat: 0, calories: 0 }
+      (acc: any, log: any) => {
+        // Parse sugar from notes field if present
+        let sugar = 0;
+        if (log.notes) {
+          const match = log.notes.match(/Sugar:\s*([\d.]+)g/i);
+          if (match) sugar = parseFloat(match[1]) || 0;
+        }
+        return {
+          protein: acc.protein + (log.proteinGrams || 0),
+          carbs: acc.carbs + (log.carbsGrams || 0),
+          fat: acc.fat + (log.fatGrams || 0),
+          calories: acc.calories + (log.calories || 0),
+          sugar: acc.sugar + sugar,
+        };
+      },
+      { protein: 0, carbs: 0, fat: 0, calories: 0, sugar: 0 }
     );
   }, [foodLogs]);
 
@@ -201,29 +197,32 @@ export function FoodLogger() {
     <div className="space-y-4">
       {/* ── Macro Summary ── */}
       <div className="rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-white/10 p-6">
-        {/* Large circles: Calories + Protein */}
-        <div className="flex justify-center gap-8 mb-5">
+        {/* Large Calories circle centered */}
+        <div className="flex justify-center mb-5">
           <MacroCircle value={dailyTotals.calories} label="CALORIES" color="#4ade80" size="large" />
-          <MacroCircle value={dailyTotals.protein} label="PROTEIN" unit="g" color="#fb923c" size="large" />
         </div>
-        {/* Small circles: Carbs, Fat */}
-        <div className="flex justify-center gap-6">
+
+        {/* 4 smaller circles: Protein, Carbs, Fat, Sugar */}
+        <div className="flex justify-center gap-4">
+          <MacroCircle value={dailyTotals.protein} label="PROTEIN" unit="g" color="#fb923c" size="small" />
           <MacroCircle value={dailyTotals.carbs} label="CARBS" unit="g" color="#94a3b8" size="small" />
           <MacroCircle value={dailyTotals.fat} label="FAT" unit="g" color="#94a3b8" size="small" />
+          <MacroCircle value={dailyTotals.sugar} label="SUGAR" unit="g" color="#f472b6" size="small" />
         </div>
-        {/* Goal progress bar (if targets set) */}
-        {targetTotals.calories > 0 && (
+
+        {/* Goal progress bar */}
+        {targetCalories > 0 && (
           <div className="mt-5 space-y-1">
             <div className="flex justify-between text-xs text-slate-400">
               <span>{Math.round(dailyTotals.calories)} cal logged</span>
-              <span>{Math.round(targetTotals.calories)} cal goal</span>
+              <span>{Math.round(targetCalories)} cal goal</span>
             </div>
             <div className="h-2 bg-white/10 rounded-full overflow-hidden">
               <div
                 className="h-full rounded-full transition-all"
                 style={{
-                  width: `${Math.min(100, (dailyTotals.calories / targetTotals.calories) * 100)}%`,
-                  background: dailyTotals.calories > targetTotals.calories ? "#ef4444" : "#22d3ee",
+                  width: `${Math.min(100, (dailyTotals.calories / targetCalories) * 100)}%`,
+                  background: dailyTotals.calories > targetCalories ? "#ef4444" : "#22d3ee",
                 }}
               />
             </div>
@@ -344,21 +343,13 @@ export function FoodLogger() {
               </div>
             )}
 
-            {/* Action bar */}
-            <div className="grid grid-cols-2 border-t border-white/10">
-              <button
-                onClick={() => openAddFood(meal)}
-                className="flex items-center justify-center gap-2 py-3 text-sm font-semibold text-slate-300 hover:bg-white/5 transition-colors border-r border-white/10"
-              >
-                <span className="text-slate-400">✏</span> Add Food
-              </button>
-              <button
-                onClick={() => openAddFood(meal)}
-                className="flex items-center justify-center gap-2 py-3 text-sm font-bold text-white bg-cyan-700/60 hover:bg-cyan-600/70 transition-colors"
-              >
-                <Plus className="h-4 w-4" /> Add Food
-              </button>
-            </div>
+            {/* Single Add Food button */}
+            <button
+              onClick={() => openAddFood(meal)}
+              className="w-full flex items-center justify-center gap-2 py-3 text-sm font-bold text-white bg-cyan-700/60 hover:bg-cyan-600/70 transition-colors border-t border-white/10"
+            >
+              <Plus className="h-4 w-4" /> Add Food
+            </button>
           </div>
         );
       })}
