@@ -726,11 +726,32 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
 
   // ── Product found: show macros + serving size input ──
   if (scannedProduct) {
+    // Build a human-readable serving label from the label data
+    // e.g. "0.5 cup", "3 oz", "1 scoop", "100 g"
+    const labelSizeNum = parseFloat(scannedProduct.labelServingSize) || 1;
+    const labelUnit = scannedProduct.labelServingUnit?.toLowerCase() || "g";
+    const servingDisplayUnit = labelUnit === "g" || labelUnit === "gram" || labelUnit === "grams"
+      ? "g"
+      : labelUnit === "oz" || labelUnit === "ounce" || labelUnit === "ounces"
+      ? "oz"
+      : labelUnit === "cup" || labelUnit === "cups"
+      ? "cup"
+      : labelUnit === "ml" || labelUnit === "milliliter"
+      ? "ml"
+      : labelUnit === "tbsp" || labelUnit === "tablespoon"
+      ? "tbsp"
+      : labelUnit === "tsp" || labelUnit === "teaspoon"
+      ? "tsp"
+      : labelUnit;
+
+    // One serving = labelSizeNum servingDisplayUnit
+    const oneServingLabel = `${labelSizeNum} ${servingDisplayUnit}`;
+
     const unitOptions: { value: WeightUnit; label: string }[] = [
-      { value: "servings", label: "Servings" },
+      { value: "servings", label: `Serving (${oneServingLabel})` },
       { value: "g", label: "Grams (g)" },
       { value: "oz", label: "Ounces (oz)" },
-      { value: "scoops", label: "Scoops" },
+      ...(scannedProduct.defaultUnit === "scoops" ? [{ value: "scoops" as WeightUnit, label: "Scoops" }] : []),
     ];
 
     return (
@@ -743,8 +764,8 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
               {scannedProduct.brand && (
                 <p className="text-xs text-gray-400">{scannedProduct.brand}</p>
               )}
-              <p className="text-xs text-gray-500 mt-0.5">
-                Label serving: {scannedProduct.labelServingSize}{scannedProduct.labelServingUnit}
+              <p className="text-xs text-cyan-400/80 mt-0.5 font-medium">
+                1 serving = {oneServingLabel}
               </p>
             </div>
             <Button
@@ -761,14 +782,14 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
         {/* Amount + unit input */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">How much did you eat?</Label>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <Input
               type="number"
               min="0.1"
               step="0.1"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="w-28 text-center text-lg font-semibold"
+              className="w-24 text-center text-lg font-semibold"
               placeholder="1"
             />
             <div className="flex gap-1 flex-wrap">
@@ -788,16 +809,11 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
             </div>
           </div>
           {unit === "scoops" && scannedProduct.scoopSizeG && (
-            <p className="text-xs text-gray-500">1 scoop = {Math.round(scannedProduct.scoopSizeG)}g</p>
-          )}
-          {unit === "servings" && (
-            <p className="text-xs text-gray-500">
-              1 serving = {scannedProduct.labelServingSize}{scannedProduct.labelServingUnit}
-            </p>
+            <p className="text-xs text-gray-500">1 scoop ≈ {Math.round(scannedProduct.scoopSizeG)}g</p>
           )}
         </div>
 
-        {/* Calculated macros */}
+        {/* Calculated macros — always shown since amount defaults to 1 */}
         {computed ? (
           <div className="grid grid-cols-4 gap-2 text-xs">
             <div className="p-2 bg-gray-800 rounded text-center">

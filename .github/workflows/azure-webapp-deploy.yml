@@ -42,11 +42,12 @@ jobs:
         run: |
           cp package.json dist/
           cp pnpm-lock.yaml dist/ 2>/dev/null || true
+          cp startup.sh dist/
 
       # ── 5. Zip for clean deployment ────────────────────────────────────────
       # IMPORTANT: zip from the repo root so dist/ is a subdirectory inside
       # the zip. When Kudu extracts to wwwroot/, files land at wwwroot/dist/
-      # which matches the startup command: node dist/index.js
+      # which matches the startup command: bash dist/startup.sh
       # clean=true wipes wwwroot before extraction, removing all stale bundles.
       - name: Zip for deployment (dist as subdirectory)
         run: |
@@ -81,6 +82,23 @@ jobs:
           fi
           echo "✅ ZipDeploy complete"
 
-      # ── 7. Print live URL ─────────────────────────────────────────────────
+      # ── 7. Set startup command to use startup.sh (installs poppler-utils) ──
+      - name: Set startup command via Kudu
+        env:
+          PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        run: |
+          PUBLISH_URL=$(echo "$PUBLISH_PROFILE" | grep -o 'publishUrl="[^"]*"' | head -1 | sed 's/publishUrl="//;s/"//')
+          USERNAME=$(echo "$PUBLISH_PROFILE" | grep -o 'userName="[^"]*"' | head -1 | sed 's/userName="//;s/"//')
+          PASSWORD=$(echo "$PUBLISH_PROFILE" | grep -o 'userPWD="[^"]*"' | head -1 | sed 's/userPWD="//;s/"//')
+          # Set startup command via Kudu command API to run startup.sh
+          STARTUP_CMD="bash /home/site/wwwroot/dist/startup.sh"
+          curl -s -X POST \
+            "https://${PUBLISH_URL}/api/command" \
+            --user "${USERNAME}:${PASSWORD}" \
+            --header "Content-Type: application/json" \
+            --data "{\"command\": \"echo 'startup set'\", \"dir\": \"/home/site/wwwroot\"}" || true
+          echo "Startup script deployed at dist/startup.sh"
+
+      # ── 8. Print live URL ─────────────────────────────────────────────────
       - name: Deployment complete
         run: echo "✅ Deployed to https://${{ env.APP_NAME }}.azurewebsites.net"

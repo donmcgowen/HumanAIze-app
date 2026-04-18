@@ -5,7 +5,8 @@
  * Text extraction libraries return nothing. We use vision AI instead:
  *
  * 1. Convert PDF page 1 to PNG using pdftoppm (poppler-utils)
- * 2. Send the PNG as a base64 image_url to GPT-4.1-mini vision
+ * 2. Send the PNG as a base64 image_url to the LLM via invokeLLM
+ *    (invokeLLM correctly handles the Forge API URL/key on Azure)
  * 3. Parse the structured JSON response
  */
 
@@ -13,7 +14,7 @@ import { execSync } from "child_process";
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { ENV } from "./_core/env";
+import { invokeLLM } from "./_core/llm";
 
 export interface ExtractedClarityData {
   averageGlucose?: number;
@@ -55,23 +56,19 @@ async function pdfToPageImage(pdfBuffer: Buffer): Promise<Buffer | null> {
     });
 
     // pdftoppm names the output file as <prefix>-01.png
-    const pngPath = `${outPrefix}-01.png`;
-    if (!existsSync(pngPath)) {
-      // Try zero-padded variants
-      const variants = [`${outPrefix}-1.png`, `${outPrefix}-001.png`];
-      for (const v of variants) {
-        if (existsSync(v)) {
-          const buf = readFileSync(v);
-          unlinkSync(v);
-          return buf;
-        }
+    const candidates = [
+      `${outPrefix}-01.png`,
+      `${outPrefix}-1.png`,
+      `${outPrefix}-001.png`,
+    ];
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        const buf = readFileSync(candidate);
+        try { unlinkSync(candidate); } catch {}
+        return buf;
       }
-      return null;
     }
-
-    const buf = readFileSync(pngPath);
-    unlinkSync(pngPath);
-    return buf;
+    return null;
   } catch (err) {
     console.warn("[pdfExtraction] pdftoppm failed:", err instanceof Error ? err.message : err);
     return null;
@@ -81,7 +78,8 @@ async function pdfToPageImage(pdfBuffer: Buffer): Promise<Buffer | null> {
 }
 
 /**
- * Use vision AI to extract glucose metrics from a PNG image of the Clarity report.
+ * Use invokeLLM (vision) to extract glucose metrics from a PNG image of the Clarity report.
+ * Uses the same Forge API URL/key as the rest of the app — works correctly on Azure.
  */
 async function extractWithVision(imageBuffer: Buffer): Promise<{
   averageGlucose?: number;
@@ -90,33 +88,13 @@ async function extractWithVision(imageBuffer: Buffer): Promise<{
   timeAboveRange?: number;
   timeBelowRange?: number;
   standardDeviation?: number;
-  minGlucose?: number;
-  maxGlucose?: number;
   summary?: string;
 } | null> {
-  const apiKey = ENV.forgeApiKey;
-  if (!apiKey) {
-    throw new Error("BUILT_IN_FORGE_API_KEY is not configured");
-  }
-
-  const base = ENV.forgeApiUrl ? ENV.forgeApiUrl.replace(/\/$/, "") : "https://api.openai.com/v1";
-  const apiUrl = base.includes("openai.azure.com") ? base : `${base}/chat/completions`;
-
-  // Use gpt-4.1-mini for vision (supports image_url)
-  // Fall back to ENV.llmModel if it's already a vision-capable model
-  const visionModel = "gpt-4.1-mini";
-
   const base64 = imageBuffer.toString("base64");
 
-  const response = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: visionModel,
-      max_tokens: 500,
+  let result;
+  try {
+    result = await invokeLLM({
       messages: [
         {
           role: "user",
@@ -154,16 +132,13 @@ Return ONLY valid JSON with no markdown:
           ],
         },
       ],
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Vision API error: ${response.status} ${errText.slice(0, 200)}`);
+    });
+  } catch (err) {
+    console.error("[pdfExtraction] invokeLLM vision call failed:", err instanceof Error ? err.message : err);
+    throw err;
   }
 
-  const data = await response.json() as any;
-  const content = data.choices?.[0]?.message?.content;
+  const content = result?.choices?.[0]?.message?.content;
   if (!content || typeof content !== "string") return null;
 
   try {
@@ -171,13 +146,13 @@ Return ONLY valid JSON with no markdown:
     if (!jsonMatch) return null;
     const parsed = JSON.parse(jsonMatch[0]);
     return {
-      averageGlucose: parsed.averageGlucose ?? undefined,
-      timeInRange: parsed.timeInRange ?? undefined,
-      estimatedA1C: parsed.a1cEstimate ?? undefined,
-      timeAboveRange: parsed.timeAboveRange ?? undefined,
-      timeBelowRange: parsed.timeBelowRange ?? undefined,
-      standardDeviation: parsed.standardDeviation ?? undefined,
-      summary: parsed.summary ?? undefined,
+      averageGlucose: typeof parsed.averageGlucose === "number" ? parsed.averageGlucose : undefined,
+      timeInRange: typeof parsed.timeInRange === "number" ? parsed.timeInRange : undefined,
+      estimatedA1C: typeof parsed.a1cEstimate === "number" ? parsed.a1cEstimate : undefined,
+      timeAboveRange: typeof parsed.timeAboveRange === "number" ? parsed.timeAboveRange : undefined,
+      timeBelowRange: typeof parsed.timeBelowRange === "number" ? parsed.timeBelowRange : undefined,
+      standardDeviation: typeof parsed.standardDeviation === "number" ? parsed.standardDeviation : undefined,
+      summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
     };
   } catch {
     return null;
@@ -211,11 +186,11 @@ export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<Extracte
 
   if (!imageBuffer) {
     throw new Error(
-      "Could not convert PDF to image. Please ensure poppler-utils (pdftoppm) is installed on the server."
+      "Could not convert PDF to image. Please ensure poppler-utils (pdftoppm) is installed on the server, or contact support."
     );
   }
 
-  // Step 2: Vision AI extraction
+  // Step 2: Vision AI extraction using invokeLLM (handles Azure Forge API correctly)
   const result = await extractWithVision(imageBuffer);
 
   if (!result) {
@@ -253,12 +228,11 @@ export async function extractTextFromPDF(pdfBuffer: Buffer): Promise<string> {
 }
 
 /**
- * Validate if PDF appears to be a Dexcom Clarity report (by filename/metadata check).
+ * Validate if PDF appears to be a Dexcom Clarity report.
  * Since the PDF is image-based, we can only do a loose check.
  */
 export function validateClarityPDF(text: string): { valid: boolean; error?: string } {
   // text will be empty for image-based PDFs — always pass validation
-  // The actual content check happens after vision extraction
   return { valid: true };
 }
 
