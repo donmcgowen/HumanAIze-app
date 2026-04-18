@@ -432,7 +432,7 @@ export const appRouter = router({
           });
         }
 
-        const extracted = parseClarityReportText(text);
+        const extracted = await parseClarityReportText(text);
 
         if (
           extracted.averageGlucose === undefined &&
@@ -441,7 +441,7 @@ export const appRouter = router({
         ) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Could not extract A1C, average glucose, or time in range from the PDF",
+            message: "Could not extract A1C, average glucose, or time in range from the PDF. Please ensure this is a Dexcom Clarity PDF export.",
           });
         }
 
@@ -453,11 +453,18 @@ export const appRouter = router({
 
         return {
           success: true,
+          extractionMethod: extracted.extractionMethod ?? "regex",
           metrics: {
             averageGlucose: extracted.averageGlucose ?? null,
             timeInRange: extracted.timeInRange ?? null,
             a1cEstimate: extracted.estimatedA1C ?? null,
+            timeAboveRange: extracted.timeAboveRange ?? null,
+            timeBelowRange: extracted.timeBelowRange ?? null,
+            standardDeviation: extracted.standardDeviation ?? null,
+            minGlucose: extracted.minGlucose ?? null,
+            maxGlucose: extracted.maxGlucose ?? null,
           },
+          aiSummary: extracted.aiSummary ?? null,
         };
       }),
 

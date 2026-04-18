@@ -5,12 +5,13 @@ import { WeightTracker } from "@/components/WeightTracker";
 import { CGMSection } from "@/components/CGMSection";
 import { BodyMeasurementSection } from "@/components/BodyMeasurementSection";
 import { ManualGlucoseSection } from "@/components/ManualGlucoseSection";
-import { Loader2, Footprints, Weight } from "lucide-react";
+import { Loader2, Footprints, Weight, Activity, Droplets, Clock } from "lucide-react";
 import { useCallback, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
 export function Monitoring() {
   const { data: user, isLoading } = trpc.auth.me.useQuery();
+  const { data: profile } = trpc.profile.get.useQuery(undefined, { enabled: !!user });
   const { data: dashboard } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const [liveSteps, setLiveSteps] = useState(0);
   const handleStepUpdate = useCallback((total: number) => setLiveSteps(total), []);
@@ -118,6 +119,39 @@ export function Monitoring() {
           </h2>
           <StepCounter onTotalChange={handleStepUpdate} />
         </div>
+
+        {/* Dexcom Clarity Summary Cards */}
+        {(profile?.cgmA1cEstimate || profile?.cgmAverageGlucose || profile?.cgmTimeInRange) && (
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold text-white mb-3 flex items-center gap-2">
+              <Activity className="w-5 h-5 text-orange-400" />
+              Dexcom Clarity — Last Report
+            </h2>
+            <div className="grid grid-cols-3 gap-4">
+              {profile?.cgmA1cEstimate && (
+                <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4 text-center">
+                  <div className="text-xs text-orange-300 uppercase tracking-wide mb-1">Est. A1C</div>
+                  <div className="text-4xl font-bold text-orange-400">{profile.cgmA1cEstimate.toFixed(1)}%</div>
+                  <div className="text-xs text-slate-500 mt-1">From Clarity PDF</div>
+                </div>
+              )}
+              {profile?.cgmAverageGlucose && (
+                <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-xl p-4 text-center">
+                  <div className="text-xs text-cyan-300 uppercase tracking-wide mb-1">Avg Glucose</div>
+                  <div className="text-4xl font-bold text-cyan-400">{profile.cgmAverageGlucose}</div>
+                  <div className="text-xs text-slate-500 mt-1">mg/dL</div>
+                </div>
+              )}
+              {profile?.cgmTimeInRange && (
+                <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 text-center">
+                  <div className="text-xs text-green-300 uppercase tracking-wide mb-1">Time in Range</div>
+                  <div className="text-4xl font-bold text-green-400">{profile.cgmTimeInRange.toFixed(0)}%</div>
+                  <div className="text-xs text-slate-500 mt-1">Target: ≥70%</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* CGM Section */}
         <div className="mb-6">

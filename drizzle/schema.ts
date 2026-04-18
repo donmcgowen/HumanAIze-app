@@ -300,7 +300,7 @@ export const foodSearchCache = mysqlTable("food_search_cache", {
   carbsGrams: double("carbsGrams").notNull(),
   fatGrams: double("fatGrams").notNull(),
   servingSize: varchar("servingSize", { length: 120 }).default("100g").notNull(),
-  source: mysqlEnum("source", ["gemini", "usda", "open_food_facts"]).default("gemini").notNull(),
+  source: mysqlEnum("source", ["gemini", "usda", "open_food_facts", "branded", "usda_generic"]).default("gemini").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   expiresAt: timestamp("expiresAt").notNull(),
 });

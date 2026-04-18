@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
@@ -10,8 +10,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 
 export function WeightTracker() {
   const [open, setOpen] = useState(false);
-  const [startingWeightInput, setStartingWeightInput] = useState("");
-  const [currentWeightInput, setCurrentWeightInput] = useState("");
+  const [weightInput, setWeightInput] = useState("");
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
@@ -36,54 +35,25 @@ export function WeightTracker() {
   });
 
   const handleAddWeight = async () => {
-    const hasStarting = startingWeightInput.trim().length > 0;
-    const hasCurrent = currentWeightInput.trim().length > 0;
-
-    if (!hasStarting && !hasCurrent) {
-      setError("Please enter a starting and/or current weight");
+    if (!weightInput.trim()) {
+      setError("Please enter your current weight");
       return;
     }
 
-    if (hasStarting && isNaN(Number(startingWeightInput))) {
-      setError("Please enter a valid starting weight");
+    if (isNaN(Number(weightInput))) {
+      setError("Please enter a valid weight");
       return;
     }
 
-    if (hasCurrent && isNaN(Number(currentWeightInput))) {
-      setError("Please enter a valid current weight");
-      return;
-    }
-
-    const now = Date.now();
-    const operations: Array<Promise<any>> = [];
-
-    if (hasStarting) {
-      const startingWeightNum = Math.round(Number(startingWeightInput));
-      operations.push(
-        addWeightMutation.mutateAsync({
-          weightLbs: startingWeightNum,
-          // Keep starting entry chronologically older than current if both are entered.
-          recordedAt: hasCurrent ? now - 1000 : now,
-          notes: notes ? `[START] ${notes}` : "[START]",
-        })
-      );
-    }
-
-    if (hasCurrent) {
-      const currentWeightNum = Math.round(Number(currentWeightInput));
-      operations.push(
-        addWeightMutation.mutateAsync({
-          weightLbs: currentWeightNum,
-          recordedAt: now,
-          notes: notes ? `[CURRENT] ${notes}` : "[CURRENT]",
-        })
-      );
-    }
+    const weightNum = Math.round(Number(weightInput));
 
     try {
-      await Promise.all(operations);
-      setStartingWeightInput("");
-      setCurrentWeightInput("");
+      await addWeightMutation.mutateAsync({
+        weightLbs: weightNum,
+        recordedAt: Date.now(),
+        notes: notes || undefined,
+      });
+      setWeightInput("");
       setNotes("");
       setError("");
       setOpen(false);
@@ -94,11 +64,8 @@ export function WeightTracker() {
   };
 
   // Calculate weight change
-  const taggedCurrent = entries.find((e) => (e.notes || "").startsWith("[CURRENT]"));
-  const taggedStart = entries.find((e) => (e.notes || "").startsWith("[START]"));
-
-  const currentWeight = taggedCurrent?.weightLbs ?? (entries.length > 0 ? entries[0].weightLbs : null);
-  const startWeight = taggedStart?.weightLbs ?? (entries.length > 0 ? entries[entries.length - 1].weightLbs : null);
+  const currentWeight = entries.length > 0 ? entries[0].weightLbs : null;
+  const startWeight = entries.length > 0 ? entries[entries.length - 1].weightLbs : null;
   const weightChange = currentWeight && startWeight ? currentWeight - startWeight : 0;
 
   // Format estimated completion date
@@ -148,54 +115,33 @@ export function WeightTracker() {
         </div>
       )}
 
-      {/* Add Weight Button */}
+      {/* Log Weight Button */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogTrigger asChild>
           <Button className="w-full bg-cyan-500 hover:bg-cyan-600 text-black font-semibold">
-            + Add Weight
+            + Log Weight
           </Button>
         </DialogTrigger>
         <DialogContent className="bg-slate-900 border-slate-700">
           <DialogHeader>
-            <DialogTitle className="text-white">Log Weight Entry</DialogTitle>
+            <DialogTitle className="text-white">Log Current Weight</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="startingWeight" className="text-slate-300">
-                Starting Weight (lbs) - Whole numbers only
+              <Label htmlFor="weight" className="text-slate-300">
+                Current Weight (lbs) — Whole numbers only
               </Label>
               <Input
-                id="startingWeight"
-                type="number"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                placeholder="e.g., 180"
-                value={startingWeightInput}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  // Only allow whole numbers
-                  if (val === "" || /^\d+$/.test(val)) {
-                    setStartingWeightInput(val);
-                  }
-                }}
-                className="mt-2 bg-slate-800 border-slate-600 text-white"
-              />
-            </div>
-            <div>
-              <Label htmlFor="currentWeight" className="text-slate-300">
-                Current Weight (lbs) - Whole numbers only
-              </Label>
-              <Input
-                id="currentWeight"
+                id="weight"
                 type="number"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 placeholder="e.g., 190"
-                value={currentWeightInput}
+                value={weightInput}
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === "" || /^\d+$/.test(val)) {
-                    setCurrentWeightInput(val);
+                    setWeightInput(val);
                   }
                 }}
                 className="mt-2 bg-slate-800 border-slate-600 text-white"
@@ -220,7 +166,7 @@ export function WeightTracker() {
               disabled={addWeightMutation.isPending}
               className="w-full bg-cyan-500 hover:bg-cyan-600 text-black font-semibold"
             >
-              {addWeightMutation.isPending ? "Saving..." : "Save Weight"}
+              {addWeightMutation.isPending ? "Saving..." : "Log Weight"}
             </Button>
           </div>
         </DialogContent>
