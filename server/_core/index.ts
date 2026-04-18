@@ -69,6 +69,15 @@ async function startServer() {
     res.status(200).json({ ok: true, service: "humanaize-api" });
   });
 
+  app.get("/api/healthz/llm", (_req, res) => {
+    const { ENV } = require("./env");
+    res.status(200).json({
+      forgeApiUrl: ENV.forgeApiUrl || "(not set)",
+      forgeApiKeyPrefix: ENV.forgeApiKey ? ENV.forgeApiKey.substring(0, 10) + "..." : "(not set)",
+      llmModel: ENV.llmModel,
+    });
+  });
+
   app.get("/api/healthz/db", async (_req, res) => {
     const health = await getDatabaseHealth();
     res.status(health.ok ? 200 : 503).json(health);
