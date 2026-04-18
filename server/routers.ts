@@ -26,7 +26,7 @@ import { syncAllSources } from "./dataImport";
 import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource } from "./db";
 import { searchUSDAFoods, searchUSDABrandedFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
-import { lookupBarcodeProduct, getFoodVariant } from "./barcode";
+import { lookupBarcodeProduct, getFoodVariant, getDefaultUnit } from "./barcode";
 import { generateFoodInsights, type DailyMacros } from "./insights";
 import { getMealSuggestions, getMealSuggestionsByCategory } from "@shared/mealSuggestions";
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
@@ -579,9 +579,11 @@ export const appRouter = router({
         const product = await lookupBarcodeProduct(input.barcode);
         if (!product) return null;
         const variant = getFoodVariant(product.name);
+        const defaultUnit = getDefaultUnit(product.name, product.servingUnit);
         return {
           ...product,
           variant: variant ? { type: variant.type } : null,
+          defaultUnit,
         };
       }),
     generateInsights: protectedProcedure
@@ -814,7 +816,7 @@ export const appRouter = router({
         // Note: generic USDA cache entries are bypassed for branded-looking queries (handled in getLocalCachedFood)
         const localCached = await getLocalCachedFood(normalizedQuery);
         if (localCached && localCached.length > 0) {
-          return localCached.slice(0, 10);
+          return localCached.slice(0, 5);
         }
 
         // 2. Check DB cache if available (skip for branded queries since DB may have stale generic results)
@@ -834,7 +836,7 @@ export const appRouter = router({
               carbsPer100g: c.carbsGrams,
               fatPer100g: c.fatGrams,
               servingSize: c.servingSize || "100g",
-            })).slice(0, 10);
+            })).slice(0, 5);
             await saveLocalCachedFood(normalizedQuery, mapped, "branded");
             return mapped;
           }
@@ -848,7 +850,7 @@ export const appRouter = router({
 
         // Run USDA Branded and Open Food Facts searches in parallel
         const [usdaBrandedResults, offResults] = await Promise.allSettled([
-          searchUSDABrandedFoods(normalizedQuery, 15),
+          searchUSDABrandedFoods(normalizedQuery, 20),
           searchOpenFoodFactsByName(normalizedQuery, 15),
         ]);
 
@@ -863,16 +865,35 @@ export const appRouter = router({
         }
 
         // Merge results: interleave USDA Branded and OFF results, deduplicating by name
+        // Apply relevance scoring so exact/close matches appear first
         if (brandedFoods.length > 0 || offFoods.length > 0) {
           const seen = new Set<string>();
-          const merged: FoodResult[] = [];
+          const merged: (FoodResult & { _score: number })[] = [];
+          const queryLower = normalizedQuery.toLowerCase();
+          const queryWords = queryLower.split(/\s+/).filter(w => w.length > 1);
+
+          const scoreFood = (name: string): number => {
+            const nameLower = name.toLowerCase();
+            // Exact match
+            if (nameLower === queryLower) return 100;
+            // Starts with full query
+            if (nameLower.startsWith(queryLower)) return 90;
+            // Contains full query as substring
+            if (nameLower.includes(queryLower)) return 80;
+            // All query words present
+            const allWords = queryWords.every(w => nameLower.includes(w));
+            if (allWords) return 70;
+            // Most query words present
+            const matchCount = queryWords.filter(w => nameLower.includes(w)).length;
+            return Math.round((matchCount / queryWords.length) * 60);
+          };
 
           // Add USDA branded results first (they have serving size info)
           for (const food of mapUsdaResults(brandedFoods)) {
             const key = food.name.toLowerCase().trim();
             if (!seen.has(key)) {
               seen.add(key);
-              merged.push(food);
+              merged.push({ ...food, _score: scoreFood(food.name) });
             }
           }
 
@@ -889,20 +910,23 @@ export const appRouter = router({
                 carbsPer100g: food.carbsPer100g,
                 fatPer100g: food.fatPer100g,
                 servingSize: food.servingSize || "100g",
+                _score: scoreFood(food.name),
               });
             }
           }
 
-          results = merged.slice(0, 10);
+          // Sort by relevance score descending, then take top 5
+          merged.sort((a, b) => b._score - a._score);
+          results = merged.slice(0, 5).map(({ _score, ...food }) => food);
           resultSource = "branded";
-          console.log(`[Food Search] Branded search found ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length})`);
+          console.log(`[Food Search] Branded search found ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length}, top5 selected)`);
         }
 
         // 4. If no branded results, try Gemini AI
         if (results.length === 0) {
           try {
             console.log(`[Food Search] No branded results — trying Gemini for "${normalizedQuery}"`);
-            results = (await searchFoodWithGemini(normalizedQuery)).slice(0, 10);
+            results = (await searchFoodWithGemini(normalizedQuery)).slice(0, 5);
             if (results.length > 0) {
               resultSource = "gemini";
             }
@@ -915,7 +939,7 @@ export const appRouter = router({
         if (results.length === 0) {
           console.log(`[Food Search] Falling back to generic USDA for query: "${normalizedQuery}"`);
           const usdaResults = await searchUSDAFoods(normalizedQuery);
-          results = mapUsdaResults(usdaResults).slice(0, 10);
+          results = mapUsdaResults(usdaResults).slice(0, 5);
           if (results.length > 0) {
             resultSource = "usda_generic";
           }

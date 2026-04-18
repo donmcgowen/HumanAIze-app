@@ -543,15 +543,64 @@ interface AIScannerTabProps {
   onClose: () => void;
 }
 
-interface ScannerFoodCandidate {
-  foodName: string;
-  servingSize: string;
-  calories: number;
-  proteinGrams: number;
-  carbsGrams: number;
-  fatGrams: number;
-  sugarGrams: number;
+/** Per-100g nutrition data for a scanned product */
+interface ScannedProduct {
+  name: string;
+  brand?: string;
+  barcode: string;
   sourceLabel: string;
+  /** Macros per 100g */
+  caloriesPer100g: number;
+  proteinPer100g: number;
+  carbsPer100g: number;
+  fatPer100g: number;
+  sugarPer100g: number;
+  /** Original serving from label */
+  labelServingSize: string;
+  labelServingUnit: string;
+  /** Smart default unit */
+  defaultUnit: "g" | "oz" | "scoops" | "servings";
+  /** Scoop size in grams (if applicable) */
+  scoopSizeG?: number;
+}
+
+type WeightUnit = "g" | "oz" | "scoops" | "servings";
+
+function calcMacros(
+  product: ScannedProduct,
+  amount: number,
+  unit: WeightUnit
+): { calories: number; protein: number; carbs: number; fat: number; sugar: number; servingLabel: string } {
+  let grams = 0;
+  let servingLabel = "";
+
+  if (unit === "g") {
+    grams = amount;
+    servingLabel = `${amount}g`;
+  } else if (unit === "oz") {
+    grams = amount * 28.3495;
+    servingLabel = `${amount}oz`;
+  } else if (unit === "scoops") {
+    const scoopG = product.scoopSizeG || 30;
+    grams = amount * scoopG;
+    servingLabel = `${amount} scoop${amount !== 1 ? "s" : ""}`;
+  } else {
+    // servings — use label serving size
+    const labelG = parseFloat(product.labelServingSize) || 100;
+    const labelUnit = product.labelServingUnit.toLowerCase();
+    grams = labelUnit === "oz" ? amount * labelG * 28.3495 : amount * labelG;
+    servingLabel = `${amount} serving${amount !== 1 ? "s" : ""}`;
+  }
+
+  const factor = grams / 100;
+  return {
+    calories: Math.round(product.caloriesPer100g * factor),
+    protein: Math.round(product.proteinPer100g * factor),
+    carbs: Math.round(product.carbsPer100g * factor),
+    fat: Math.round(product.fatPer100g * factor),
+    sugar: Math.round(product.sugarPer100g * factor),
+    servingLabel,
+  };
 }
 
 function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
@@ -562,13 +611,17 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
   const [scanResult, setScanResult] = useState<string | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [scannerError, setScannerError] = useState<string | null>(null);
-  const [usdaQuery, setUsdaQuery] = useState("");
-  const [selectedFood, setSelectedFood] = useState<ScannerFoodCandidate | null>(null);
+  const [scannedProduct, setScannedProduct] = useState<ScannedProduct | null>(null);
+  const [amount, setAmount] = useState("1");
+  const [unit, setUnit] = useState<WeightUnit>("servings");
 
-  const { data: usdaResults, isLoading: usdaLoading } = trpc.food.searchUSDA.useQuery(
-    { query: usdaQuery },
-    { enabled: usdaQuery.trim().length > 2 }
-  );
+  // Derived macros based on current amount/unit
+  const computed = useMemo(() => {
+    if (!scannedProduct) return null;
+    const num = parseFloat(amount);
+    if (!num || num <= 0) return null;
+    return calcMacros(scannedProduct, num, unit);
+  }, [scannedProduct, amount, unit]);
 
   useEffect(() => {
     let scanner: Html5Qrcode | null = null;
@@ -581,44 +634,64 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
     };
 
     const onScanSuccess = async (decodedText: string) => {
+      if (!isMounted) return;
       const normalizedBarcode = normalizeBarcode(decodedText);
       if (!normalizedBarcode) {
-        if (isMounted) {
-          setScannerError("Scan detected, but no valid 8-14 digit barcode was found.");
-          toast.error("Invalid barcode format");
-        }
+        setScannerError("Scan detected, but no valid 8-14 digit barcode was found.");
         return;
       }
 
-      if (isMounted) {
-        setScanResult(normalizedBarcode);
-        setLookupLoading(true);
-        setScannerError(null);
-      }
+      setScanResult(normalizedBarcode);
+      setLookupLoading(true);
+      setScannerError(null);
+
+      // Stop scanner once we have a barcode
+      if (scanner) { scanner.stop().catch(() => {}); scanner = null; }
 
       try {
         const product = await utils.food.lookupBarcode.fetch({ barcode: normalizedBarcode });
-
         if (!isMounted) return;
 
         if (product) {
-          setSelectedFood({
-            foodName: product.name,
-            servingSize: `${product.servingSize}${product.servingUnit}`,
-            calories: Number(product.calories) || 0,
-            proteinGrams: Number(product.protein) || 0,
-            carbsGrams: Number(product.carbs) || 0,
-            fatGrams: Number(product.fat) || 0,
-            sugarGrams: Number((product as any).sugar) || 0,
-            sourceLabel: `Open Food Facts (${normalizedBarcode})`,
+          // Calculate per-100g values
+          const servingSizeNum = parseFloat(product.servingSize) || 100;
+          const servingUnitStr = (product.servingUnit || "g").toLowerCase();
+          const servingInGrams = servingUnitStr === "oz" ? servingSizeNum * 28.3495 : servingSizeNum;
+          const factor = servingInGrams / 100;
+
+          const cal100 = product.caloriesPer100g ?? (factor > 0 ? Math.round(product.calories / factor) : product.calories);
+          const prot100 = product.proteinPer100g ?? (factor > 0 ? product.protein / factor : product.protein);
+          const carb100 = product.carbsPer100g ?? (factor > 0 ? product.carbs / factor : product.carbs);
+          const fat100 = product.fatPer100g ?? (factor > 0 ? product.fat / factor : product.fat);
+          const sug100 = factor > 0 ? (product.sugar || 0) / factor : (product.sugar || 0);
+
+          const defaultUnit = (product.defaultUnit as WeightUnit) || "servings";
+
+          setScannedProduct({
+            name: product.name,
+            brand: product.brand || undefined,
+            barcode: normalizedBarcode,
+            sourceLabel: product.brand ? `${product.brand} (barcode: ${normalizedBarcode})` : `Barcode: ${normalizedBarcode}`,
+            caloriesPer100g: cal100,
+            proteinPer100g: prot100,
+            carbsPer100g: carb100,
+            fatPer100g: fat100,
+            sugarPer100g: sug100,
+            labelServingSize: product.servingSize,
+            labelServingUnit: product.servingUnit,
+            defaultUnit,
+            scoopSizeG: defaultUnit === "scoops" ? servingInGrams : undefined,
           });
-          toast.success(`Found product: ${product.name}`);
+          setUnit(defaultUnit);
+          setAmount("1");
+          toast.success(`Found: ${product.name}`);
         } else {
-          toast.info("No Open Food Facts match. Try USDA search below.");
+          setScannerError("Product not found. Try scanning again or enter manually.");
+          toast.error("Product not found");
         }
       } catch (_error) {
         if (isMounted) {
-          setScannerError("Barcode lookup failed. You can still search USDA below.");
+          setScannerError("Barcode lookup failed. Please try again.");
           toast.error("Barcode lookup failed");
         }
       } finally {
@@ -626,83 +699,162 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
       }
     };
 
-    const startScanner = async () => {
-      try {
-        scanner = new Html5Qrcode(readerElementId);
-        await scanner.start(
-          { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 150 } },
-          onScanSuccess,
-          () => {}
-        );
-      } catch (err: any) {
-        if (isMounted) {
-          setScannerError(err?.message || "Camera access denied or not available.");
+    if (!scannedProduct) {
+      const startScanner = async () => {
+        try {
+          scanner = new Html5Qrcode(readerElementId);
+          await scanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 150 } },
+            onScanSuccess,
+            () => {}
+          );
+        } catch (err: any) {
+          if (isMounted) {
+            setScannerError(err?.message || "Camera access denied or not available.");
+          }
         }
-      }
-    };
-
-    startScanner();
+      };
+      startScanner();
+    }
 
     return () => {
       isMounted = false;
-      if (scanner) {
-        scanner.stop().catch(() => {});
-      }
+      if (scanner) { scanner.stop().catch(() => {}); }
     };
-  }, [readerElementId]);
+  }, [readerElementId, scannedProduct]);
 
-  if (selectedFood) {
+  // ── Product found: show macros + serving size input ──
+  if (scannedProduct) {
+    const unitOptions: { value: WeightUnit; label: string }[] = [
+      { value: "servings", label: "Servings" },
+      { value: "g", label: "Grams (g)" },
+      { value: "oz", label: "Ounces (oz)" },
+      { value: "scoops", label: "Scoops" },
+    ];
+
     return (
       <div className="space-y-4">
-        <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
-          <h4 className="font-semibold text-sm mb-1">{selectedFood.foodName}</h4>
-          <p className="text-xs text-gray-400 mb-3">{selectedFood.sourceLabel}</p>
+        {/* Product header */}
+        <div className="p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+          <div className="flex items-start justify-between">
+            <div className="flex-1 min-w-0">
+              <h4 className="font-semibold text-sm truncate">{scannedProduct.name}</h4>
+              {scannedProduct.brand && (
+                <p className="text-xs text-gray-400">{scannedProduct.brand}</p>
+              )}
+              <p className="text-xs text-gray-500 mt-0.5">
+                Label serving: {scannedProduct.labelServingSize}{scannedProduct.labelServingUnit}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-gray-400 hover:text-white ml-2 shrink-0"
+              onClick={() => { setScannedProduct(null); setScanResult(null); setScannerError(null); }}
+            >
+              Rescan
+            </Button>
+          </div>
+        </div>
+
+        {/* Amount + unit input */}
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">How much did you eat?</Label>
+          <div className="flex gap-2">
+            <Input
+              type="number"
+              min="0.1"
+              step="0.1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-28 text-center text-lg font-semibold"
+              placeholder="1"
+            />
+            <div className="flex gap-1 flex-wrap">
+              {unitOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setUnit(opt.value)}
+                  className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                    unit === opt.value
+                      ? "bg-cyan-500 text-black"
+                      : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          {unit === "scoops" && scannedProduct.scoopSizeG && (
+            <p className="text-xs text-gray-500">1 scoop = {Math.round(scannedProduct.scoopSizeG)}g</p>
+          )}
+          {unit === "servings" && (
+            <p className="text-xs text-gray-500">
+              1 serving = {scannedProduct.labelServingSize}{scannedProduct.labelServingUnit}
+            </p>
+          )}
+        </div>
+
+        {/* Calculated macros */}
+        {computed ? (
           <div className="grid grid-cols-4 gap-2 text-xs">
             <div className="p-2 bg-gray-800 rounded text-center">
-              <p className="text-gray-400">Cal</p>
-              <p className="font-semibold">{selectedFood.calories}</p>
+              <p className="text-gray-400">Calories</p>
+              <p className="font-bold text-base text-white">{computed.calories}</p>
             </div>
             <div className="p-2 bg-gray-800 rounded text-center">
               <p className="text-gray-400">Protein</p>
-              <p className="font-semibold">{selectedFood.proteinGrams}g</p>
+              <p className="font-bold text-base text-cyan-400">{computed.protein}g</p>
             </div>
             <div className="p-2 bg-gray-800 rounded text-center">
               <p className="text-gray-400">Carbs</p>
-              <p className="font-semibold">{selectedFood.carbsGrams}g</p>
+              <p className="font-bold text-base text-yellow-400">{computed.carbs}g</p>
             </div>
             <div className="p-2 bg-gray-800 rounded text-center">
               <p className="text-gray-400">Fat</p>
-              <p className="font-semibold">{selectedFood.fatGrams}g</p>
+              <p className="font-bold text-base text-orange-400">{computed.fat}g</p>
             </div>
           </div>
-        </div>
+        ) : (
+          <p className="text-xs text-gray-400 text-center">Enter an amount above to see macros</p>
+        )}
+
+        {/* Actions */}
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setSelectedFood(null)} className="flex-1">
+          <Button
+            variant="outline"
+            onClick={() => { setScannedProduct(null); setScanResult(null); setScannerError(null); }}
+            className="flex-1"
+          >
             Back
           </Button>
           <Button
+            disabled={!computed}
             onClick={() => {
+              if (!computed) return;
               onFoodAdded({
-                foodName: selectedFood.foodName,
-                servingSize: selectedFood.servingSize,
-                calories: selectedFood.calories,
-                proteinGrams: selectedFood.proteinGrams,
-                carbsGrams: selectedFood.carbsGrams,
-                fatGrams: selectedFood.fatGrams,
-                sugarGrams: selectedFood.sugarGrams,
+                foodName: scannedProduct.name,
+                servingSize: computed.servingLabel,
+                calories: computed.calories,
+                proteinGrams: computed.protein,
+                carbsGrams: computed.carbs,
+                fatGrams: computed.fat,
+                sugarGrams: computed.sugar,
               });
               onClose();
             }}
-            className="flex-1 bg-blue-600 hover:bg-blue-700"
+            className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white"
           >
-            Add Food
+            Add to Meal
           </Button>
         </div>
       </div>
     );
   }
 
+  // ── Scanner view ──
   return (
     <div className="space-y-4">
       {scannerError && (
@@ -712,71 +864,19 @@ function AIScannerTab({ onFoodAdded, onClose }: AIScannerTabProps) {
         </div>
       )}
 
-      <div id={readerElementId} className="w-full rounded-lg overflow-hidden" />
-
-      {lookupLoading && (
-        <div className="flex items-center justify-center py-4">
-          <Loader2 className="h-5 w-5 animate-spin mr-2 text-cyan-400" />
-          <span className="text-sm text-gray-400">Looking up product...</span>
+      {lookupLoading ? (
+        <div className="flex flex-col items-center justify-center py-8 gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
+          <p className="text-sm text-gray-400">Looking up product...</p>
+          {scanResult && <p className="text-xs text-gray-500">Barcode: {scanResult}</p>}
         </div>
+      ) : (
+        <div id={readerElementId} className="w-full rounded-lg overflow-hidden" />
       )}
 
-      {scanResult && !lookupLoading && (
-        <p className="text-xs text-gray-400 text-center">Scanned: {scanResult}</p>
-      )}
-
-      <div className="border-t border-gray-700 pt-4">
-        <Label htmlFor="usda-search" className="text-sm font-medium mb-2 block">
-          Or search USDA database
-        </Label>
-        <Input
-          id="usda-search"
-          placeholder="Search by food name..."
-          value={usdaQuery}
-          onChange={(e) => setUsdaQuery(e.target.value)}
-        />
-      </div>
-
-      {usdaLoading && (
-        <div className="flex items-center justify-center py-4">
-          <Loader2 className="h-5 w-5 animate-spin mr-2 text-cyan-400" />
-          <span className="text-sm text-gray-400">Searching USDA...</span>
-        </div>
-      )}
-
-      {usdaResults && usdaResults.length > 0 && (
-        <div className="space-y-2 max-h-48 overflow-y-auto">
-          {usdaResults.map((food: any, idx: number) => (
-            <Card
-              key={idx}
-              className="p-3 cursor-pointer hover:bg-blue-50/50 border-gray-700 hover:border-blue-400"
-              onClick={() =>
-                setSelectedFood({
-                  foodName: food.foodName || food.description,
-                  servingSize: food.servingSize || "100g",
-                  calories: food.calories,
-                  proteinGrams: food.proteinGrams,
-                  carbsGrams: food.carbsGrams,
-                  fatGrams: food.fatGrams,
-                  sugarGrams: food.sugarGrams || 0,
-                  sourceLabel: `USDA FoodData Central`,
-                })
-              }
-            >
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <p className="font-medium text-sm">{food.foodName || food.description}</p>
-                  <p className="text-xs text-gray-400">{food.dataType}</p>
-                </div>
-                <div className="text-right text-xs ml-2">
-                  <p className="font-semibold">{food.calories} cal</p>
-                  <p className="text-gray-400">{food.proteinGrams}g P</p>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
+      <p className="text-xs text-gray-400 text-center">
+        Point camera at the barcode on the product label
+      </p>
     </div>
   );
 }
