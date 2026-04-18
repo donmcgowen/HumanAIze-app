@@ -14,6 +14,7 @@ export const ENV = {
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
   llmModel: process.env.LLM_MODEL ?? "gpt-4o-mini",
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
 
   // Azure infrastructure
   azureStorageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME ?? "",

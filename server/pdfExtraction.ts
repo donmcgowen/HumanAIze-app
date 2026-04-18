@@ -5,8 +5,7 @@
  * Text extraction libraries return nothing. We use vision AI instead:
  *
  * 1. Convert PDF page 1 to PNG using pdftoppm (poppler-utils)
- * 2. Send the PNG as a base64 image_url to the LLM via invokeLLM
- *    (invokeLLM correctly handles the Forge API URL/key on Azure)
+ * 2. Send the PNG as base64 inline_data to Google Gemini 2.5 Flash vision API
  * 3. Parse the structured JSON response
  */
 
@@ -14,7 +13,7 @@ import { execSync } from "child_process";
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { invokeLLM } from "./_core/llm";
+import { ENV } from "./_core/env";
 
 export interface ExtractedClarityData {
   averageGlucose?: number;
@@ -78,10 +77,10 @@ async function pdfToPageImage(pdfBuffer: Buffer): Promise<Buffer | null> {
 }
 
 /**
- * Use invokeLLM (vision) to extract glucose metrics from a PNG image of the Clarity report.
- * Uses the same Forge API URL/key as the rest of the app — works correctly on Azure.
+ * Use Google Gemini 2.5 Flash vision API to extract glucose metrics from a PNG image.
+ * Calls the Gemini API directly (not through invokeLLM) since Gemini uses a different format.
  */
-async function extractWithVision(imageBuffer: Buffer): Promise<{
+async function extractWithGeminiVision(imageBuffer: Buffer): Promise<{
   averageGlucose?: number;
   timeInRange?: number;
   estimatedA1C?: number;
@@ -90,18 +89,19 @@ async function extractWithVision(imageBuffer: Buffer): Promise<{
   standardDeviation?: number;
   summary?: string;
 } | null> {
+  const geminiKey = ENV.geminiApiKey;
+  if (!geminiKey) {
+    throw new Error("GEMINI_API_KEY is not configured on the server.");
+  }
+
   const base64 = imageBuffer.toString("base64");
 
-  let result;
-  try {
-    result = await invokeLLM({
-      messages: [
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+  const payload = {
+    contents: [{
+      parts: [
         {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `This is page 1 of a Dexcom Clarity CGM report. Extract the following values exactly as shown on the page:
+          text: `This is page 1 of a Dexcom Clarity CGM report. Extract the following values exactly as shown on the page:
 
 1. Average Glucose (mg/dL) — the large number under "Average glucose"
 2. GMI or A1C estimate (%) — the number under "GMI" (Glucose Management Indicator)
@@ -120,29 +120,48 @@ Return ONLY valid JSON with no markdown:
   "timeBelowRange": <number or null>,
   "standardDeviation": <number or null>,
   "summary": "<string>"
-}`,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/png;base64,${base64}`,
-                detail: "high",
-              },
-            },
-          ],
+}`
         },
-      ],
+        {
+          inline_data: {
+            mime_type: "image/png",
+            data: base64,
+          }
+        }
+      ]
+    }],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 512,
+    }
+  };
+
+  let responseText: string;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Gemini API error ${response.status}: ${errText.substring(0, 300)}`);
+    }
+
+    const data = await response.json() as any;
+    responseText = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
   } catch (err) {
-    console.error("[pdfExtraction] invokeLLM vision call failed:", err instanceof Error ? err.message : err);
+    console.error("[pdfExtraction] Gemini vision call failed:", err instanceof Error ? err.message : err);
     throw err;
   }
 
-  const content = result?.choices?.[0]?.message?.content;
-  if (!content || typeof content !== "string") return null;
+  if (!responseText) return null;
 
   try {
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    // Strip markdown code fences if present
+    const cleaned = responseText.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     const parsed = JSON.parse(jsonMatch[0]);
     return {
@@ -155,17 +174,17 @@ Return ONLY valid JSON with no markdown:
       summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
     };
   } catch {
+    console.error("[pdfExtraction] Failed to parse Gemini JSON response:", responseText.substring(0, 200));
     return null;
   }
 }
 
 /**
  * Main entry point: parse a Dexcom Clarity PDF buffer.
- * Uses vision AI since Clarity PDFs are image-based.
+ * Uses Gemini vision AI since Clarity PDFs are image-based.
  */
 export async function parseClarityReportText(text: string): Promise<ExtractedClarityData> {
-  // This overload is kept for backward compatibility but the real work
-  // is done by parseClarityPDFBuffer below.
+  // Kept for backward compatibility — real work is done by parseClarityPDFBuffer.
   return {
     rawText: text,
     extractionMethod: "regex",
@@ -173,7 +192,7 @@ export async function parseClarityReportText(text: string): Promise<ExtractedCla
 }
 
 /**
- * Parse a Dexcom Clarity PDF buffer using vision AI.
+ * Parse a Dexcom Clarity PDF buffer using Gemini vision AI.
  */
 export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<ExtractedClarityData> {
   const data: ExtractedClarityData = {
@@ -186,12 +205,12 @@ export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<Extracte
 
   if (!imageBuffer) {
     throw new Error(
-      "Could not convert PDF to image. Please ensure poppler-utils (pdftoppm) is installed on the server, or contact support."
+      "Could not convert PDF to image. Please ensure poppler-utils (pdftoppm) is installed on the server."
     );
   }
 
-  // Step 2: Vision AI extraction using invokeLLM (handles Azure Forge API correctly)
-  const result = await extractWithVision(imageBuffer);
+  // Step 2: Gemini vision extraction
+  const result = await extractWithGeminiVision(imageBuffer);
 
   if (!result) {
     throw new Error("Vision AI could not extract data from the PDF image.");
