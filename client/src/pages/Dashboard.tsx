@@ -6,6 +6,12 @@ import { trpc } from "@/lib/trpc";
 import { WeightTracker } from "@/components/WeightTracker";
 import { StepCounter } from "@/components/StepCounter";
 
+const toPositiveNumberOrNull = (value: unknown): number | null => {
+  if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
+  if (typeof value === "string") { const p = Number(value); return Number.isFinite(p) && p > 0 ? p : null; }
+  return null;
+};
+
 export default function Dashboard() {
   const {
     data: dashboard,
@@ -15,6 +21,11 @@ export default function Dashboard() {
   } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
   const { data: cgmInsights } = trpc.cgm.getInsights.useQuery();
+  // Always fetch profile directly so macro targets are always in sync with Profile page
+  const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+  });
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   // Fetch today's food macros
@@ -63,15 +74,30 @@ export default function Dashboard() {
     { calories: 0, protein: 0, carbs: 0, fat: 0 }
   ) || { calories: 0, protein: 0, carbs: 0, fat: 0 };
 
-  const macroTargets = {
-    calories: dashboard?.dailyTargets?.calories ?? 2000,
-    protein: dashboard?.dailyTargets?.protein ?? 150,
-    carbs: dashboard?.dailyTargets?.carbs ?? 200,
-    fat: dashboard?.dailyTargets?.fat ?? 65,
+  // Macro targets: always pull directly from user profile (same source as Profile page)
+  // Fall back to defaults only if profile has not been saved yet
+  const profileMacroTargets = {
+    calories: toPositiveNumberOrNull(userProfile?.dailyCalorieTarget),
+    protein: toPositiveNumberOrNull(userProfile?.dailyProteinTarget),
+    carbs: toPositiveNumberOrNull(userProfile?.dailyCarbsTarget),
+    fat: toPositiveNumberOrNull(userProfile?.dailyFatTarget),
   };
-
-  const hasAnyProfileMacroTarget = dashboard?.dailyTargets?.hasAnyProfileTarget ?? false;
-  const missingMacroTargets = dashboard?.dailyTargets?.missingProfileTargets ?? ["calories", "protein", "carbs", "fat"];
+  const macroTargets = {
+    calories: profileMacroTargets.calories ?? 2000,
+    protein: profileMacroTargets.protein ?? 150,
+    carbs: profileMacroTargets.carbs ?? 200,
+    fat: profileMacroTargets.fat ?? 65,
+  };
+  const hasAnyProfileMacroTarget =
+    profileMacroTargets.calories !== null ||
+    profileMacroTargets.protein !== null ||
+    profileMacroTargets.carbs !== null ||
+    profileMacroTargets.fat !== null;
+  const missingMacroTargets: string[] = [];
+  if (profileMacroTargets.calories === null) missingMacroTargets.push("calories");
+  if (profileMacroTargets.protein === null) missingMacroTargets.push("protein");
+  if (profileMacroTargets.carbs === null) missingMacroTargets.push("carbs");
+  if (profileMacroTargets.fat === null) missingMacroTargets.push("fat");
 
   const macrosRemaining = {
     calories: Math.max(0, Math.round(macroTargets.calories - macroTotals.calories)),
