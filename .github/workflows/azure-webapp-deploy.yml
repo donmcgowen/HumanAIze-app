@@ -42,6 +42,8 @@ jobs:
         run: |
           cp package.json dist/
           cp pnpm-lock.yaml dist/ 2>/dev/null || true
+          # Copy patches/ so pnpm install can apply them from inside dist/
+          cp -r patches dist/ 2>/dev/null || true
           # Install production-only node_modules inside dist/ so that
           # externalized packages (pdfjs-dist, pdf-parse, etc.) are available
           # at runtime when Azure runs: node dist/index.js
