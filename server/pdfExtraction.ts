@@ -133,7 +133,7 @@ Return ONLY valid JSON (no markdown, no explanation):
             { text: summaryPrompt }
           ]
         }],
-        generationConfig: { temperature: 0, maxOutputTokens: 1024 },
+        generationConfig: { temperature: 0, maxOutputTokens: 2048 },
       })
     });
 
