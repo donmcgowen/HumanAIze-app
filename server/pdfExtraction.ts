@@ -35,8 +35,11 @@ export interface ExtractedClarityData {
 }
 
 /**
- * Convert PDF page 1 to a PNG buffer using pdftoppm.
- * Returns null if pdftoppm is not available.
+ * Convert PDF page 1 to a PNG buffer.
+ * Tries multiple approaches:
+ *   1. pdftoppm (from poppler-utils)
+ *   2. Python pdf2image (also uses poppler but may find it via a different PATH)
+ * Returns null if all approaches fail.
  */
 async function pdfToPageImage(pdfBuffer: Buffer): Promise<Buffer | null> {
   const id = `clarity_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -46,30 +49,69 @@ async function pdfToPageImage(pdfBuffer: Buffer): Promise<Buffer | null> {
   try {
     writeFileSync(pdfPath, pdfBuffer);
 
-    // -r 150: 150 DPI (good balance of quality vs size)
-    // -png: output as PNG
-    // -f 1 -l 1: only page 1
-    execSync(`pdftoppm -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, {
-      timeout: 30000,
-      stdio: "pipe",
-    });
-
-    // pdftoppm names the output file as <prefix>-01.png
-    const candidates = [
-      `${outPrefix}-01.png`,
-      `${outPrefix}-1.png`,
-      `${outPrefix}-001.png`,
+    // Approach 1: pdftoppm directly
+    const pdftoppmPaths = [
+      "pdftoppm",
+      "/usr/bin/pdftoppm",
+      "/usr/local/bin/pdftoppm",
+      "/opt/homebrew/bin/pdftoppm",
     ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        const buf = readFileSync(candidate);
-        try { unlinkSync(candidate); } catch {}
-        return buf;
+
+    for (const cmd of pdftoppmPaths) {
+      try {
+        execSync(`"${cmd}" -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, {
+          timeout: 30000,
+          stdio: "pipe",
+        });
+        const candidates = [
+          `${outPrefix}-01.png`,
+          `${outPrefix}-1.png`,
+          `${outPrefix}-001.png`,
+        ];
+        for (const candidate of candidates) {
+          if (existsSync(candidate)) {
+            const buf = readFileSync(candidate);
+            try { unlinkSync(candidate); } catch {}
+            console.log(`[pdfExtraction] PDF page 1 converted via ${cmd}`);
+            return buf;
+          }
+        }
+      } catch {
+        // try next
       }
     }
-    return null;
-  } catch (err) {
-    console.warn("[pdfExtraction] pdftoppm failed:", err instanceof Error ? err.message : err);
+
+    // Approach 2: Python pdf2image
+    const pngPath = `${outPrefix}_py.png`;
+    try {
+      const pyScript = `
+import sys
+try:
+    from pdf2image import convert_from_bytes
+    with open('${pdfPath}', 'rb') as f:
+        pdf_bytes = f.read()
+    pages = convert_from_bytes(pdf_bytes, dpi=150, first_page=1, last_page=1)
+    pages[0].save('${pngPath}', 'PNG')
+    print('ok')
+except Exception as e:
+    print('error:', e, file=sys.stderr)
+    sys.exit(1)
+`;
+      const result = execSync(`python3 -c "${pyScript.replace(/"/g, '\\"')}"`, {
+        timeout: 30000,
+        stdio: "pipe",
+      }).toString().trim();
+      if (result === "ok" && existsSync(pngPath)) {
+        const buf = readFileSync(pngPath);
+        try { unlinkSync(pngPath); } catch {}
+        console.log("[pdfExtraction] PDF page 1 converted via Python pdf2image");
+        return buf;
+      }
+    } catch (pyErr) {
+      console.warn("[pdfExtraction] Python pdf2image failed:", pyErr instanceof Error ? pyErr.message : pyErr);
+    }
+
+    console.warn("[pdfExtraction] All PDF-to-image conversion methods failed");
     return null;
   } finally {
     try { if (existsSync(pdfPath)) unlinkSync(pdfPath); } catch {}

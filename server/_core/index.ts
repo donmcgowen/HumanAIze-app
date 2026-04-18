@@ -71,10 +71,21 @@ async function startServer() {
 
   app.get("/api/healthz/llm", (_req, res) => {
     const { ENV } = require("./env");
+    const { execSync } = require("child_process");
+    let pdftoppmAvailable = false;
+    let pdftoppmVersion = "not found";
+    try {
+      const out = execSync("pdftoppm -v 2>&1", { timeout: 3000 }).toString().trim();
+      pdftoppmAvailable = true;
+      pdftoppmVersion = out.split("\n")[0];
+    } catch {}
     res.status(200).json({
       forgeApiUrl: ENV.forgeApiUrl || "(not set)",
       forgeApiKeyPrefix: ENV.forgeApiKey ? ENV.forgeApiKey.substring(0, 10) + "..." : "(not set)",
+      geminiApiKey: ENV.geminiApiKey ? ENV.geminiApiKey.substring(0, 10) + "..." : "(not set)",
       llmModel: ENV.llmModel,
+      pdftoppmAvailable,
+      pdftoppmVersion,
     });
   });
 
