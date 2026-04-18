@@ -7,13 +7,10 @@ import { trpc } from "@/lib/trpc";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import * as pdfjsLib from "pdfjs-dist";
 
-// Configure PDF.js worker - use a worker script that doesn't require module import
+// Configure PDF.js worker - use CDN URL to avoid Vite bundling issues with the worker file
 if (typeof window !== 'undefined') {
-  // Use the worker from the pdfjs-dist package directly
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.js',
-    import.meta.url
-  ).toString();
+  // Use unpkg CDN for the worker - matches the installed pdfjs-dist version
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs`;
 }
 
 export function CGMSection() {
