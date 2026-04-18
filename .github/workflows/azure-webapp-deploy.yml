@@ -43,15 +43,17 @@ jobs:
           cp package.json dist/
           cp pnpm-lock.yaml dist/ 2>/dev/null || true
 
-      # ── 5. Zip dist for clean deployment ──────────────────────────────────
-      # Zip manually so we can use Kudu's clean=true flag which wipes old
-      # stale assets (old JS bundles, CSS files) before deploying new ones.
-      - name: Zip dist for deployment
+      # ── 5. Zip for clean deployment ────────────────────────────────────────
+      # IMPORTANT: zip from the repo root so dist/ is a subdirectory inside
+      # the zip. When Kudu extracts to wwwroot/, files land at wwwroot/dist/
+      # which matches the startup command: node dist/index.js
+      # clean=true wipes wwwroot before extraction, removing all stale bundles.
+      - name: Zip for deployment (dist as subdirectory)
         run: |
-          cd dist
-          zip -r ../deploy.zip . -x "*.map"
-          cd ..
+          zip -r deploy.zip dist/ -x "dist/**/*.map"
           echo "Deploy zip size: $(du -sh deploy.zip)"
+          echo "Zip top-level entries:"
+          unzip -l deploy.zip | grep -v '/assets/' | head -20
 
       # ── 6. Deploy via Kudu ZipDeploy with clean=true ──────────────────────
       # clean=true ensures the wwwroot is wiped before new files are written,
