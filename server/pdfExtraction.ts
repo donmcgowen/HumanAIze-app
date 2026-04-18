@@ -151,16 +151,41 @@ Return ONLY valid JSON (no markdown, no explanation):
 
     // Strip markdown code fences if present
     const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error(`No JSON found in Gemini response: ${text.slice(0, 200)}`);
-    }
 
+    // Try to parse the full JSON first
     let parsed: any = {};
-    try {
-      parsed = JSON.parse(jsonMatch[0]);
-    } catch (e) {
-      throw new Error(`JSON parse failed: ${e}`);
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        // JSON is truncated — extract values with regex as fallback
+        console.warn("[pdfExtraction] JSON parse failed (likely truncated), using regex fallback");
+        const avgMatch = cleaned.match(/"averageGlucose"\s*:\s*(\d+(?:\.\d+)?)/);
+        const a1cMatch = cleaned.match(/"a1cEstimate"\s*:\s*(\d+(?:\.\d+)?)/);
+        const tirMatch = cleaned.match(/"timeInRange"\s*:\s*(\d+(?:\.\d+)?)/);
+        const tarMatch = cleaned.match(/"timeAboveRange"\s*:\s*(\d+(?:\.\d+)?)/);
+        const tbrMatch = cleaned.match(/"timeBelowRange"\s*:\s*(\d+(?:\.\d+)?)/);
+        const sdMatch = cleaned.match(/"standardDeviation"\s*:\s*(\d+(?:\.\d+)?)/);
+        if (avgMatch) parsed.averageGlucose = parseFloat(avgMatch[1]);
+        if (a1cMatch) parsed.a1cEstimate = parseFloat(a1cMatch[1]);
+        if (tirMatch) parsed.timeInRange = parseFloat(tirMatch[1]);
+        if (tarMatch) parsed.timeAboveRange = parseFloat(tarMatch[1]);
+        if (tbrMatch) parsed.timeBelowRange = parseFloat(tbrMatch[1]);
+        if (sdMatch) parsed.standardDeviation = parseFloat(sdMatch[1]);
+      }
+    } else {
+      // No JSON braces found — try regex extraction directly
+      console.warn("[pdfExtraction] No JSON found, using regex extraction");
+      const avgMatch = cleaned.match(/"averageGlucose"\s*:\s*(\d+(?:\.\d+)?)/);
+      const a1cMatch = cleaned.match(/"a1cEstimate"\s*:\s*(\d+(?:\.\d+)?)/);
+      const tirMatch = cleaned.match(/"timeInRange"\s*:\s*(\d+(?:\.\d+)?)/);
+      if (avgMatch) parsed.averageGlucose = parseFloat(avgMatch[1]);
+      if (a1cMatch) parsed.a1cEstimate = parseFloat(a1cMatch[1]);
+      if (tirMatch) parsed.timeInRange = parseFloat(tirMatch[1]);
+      if (!parsed.averageGlucose && !parsed.a1cEstimate && !parsed.timeInRange) {
+        throw new Error(`No JSON found in Gemini response: ${text.slice(0, 200)}`);
+      }
     }
 
     data.averageGlucose = typeof parsed.averageGlucose === "number" ? parsed.averageGlucose : undefined;
