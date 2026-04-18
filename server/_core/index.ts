@@ -89,6 +89,76 @@ async function startServer() {
     });
   });
 
+  // Debug endpoint: test pdftoppm from Node.js with a tiny PDF
+  app.get("/api/healthz/pdftoppm", async (_req, res) => {
+    const { execSync } = require("child_process");
+    const { writeFileSync, existsSync, readdirSync, unlinkSync } = require("fs");
+    const { tmpdir } = require("os");
+    const { join } = require("path");
+    const results: any = {};
+
+    try {
+      // Test 1: which pdftoppm
+      results.which = execSync("which pdftoppm 2>&1", { timeout: 3000 }).toString().trim();
+    } catch (e: any) { results.which = "ERROR: " + e.message; }
+
+    try {
+      // Test 2: tmpdir
+      results.tmpdir = tmpdir();
+    } catch (e: any) { results.tmpdir = "ERROR: " + e.message; }
+
+    try {
+      // Test 3: write a test file to tmpdir
+      const testPath = join(tmpdir(), "test_write.txt");
+      writeFileSync(testPath, "test");
+      results.tmpdirWritable = true;
+      unlinkSync(testPath);
+    } catch (e: any) { results.tmpdirWritable = "ERROR: " + e.message; }
+
+    try {
+      // Test 4: list tmpdir contents
+      results.tmpdirContents = readdirSync(tmpdir()).slice(0, 10);
+    } catch (e: any) { results.tmpdirContents = "ERROR: " + e.message; }
+
+    try {
+      // Test 5: create a minimal valid PDF and run pdftoppm on it
+      // This is a minimal 1-page PDF with a white rectangle
+      const minimalPdf = Buffer.from(
+        "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +
+        "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n" +
+        "3 0 obj<</Type/Page/MediaBox[0 0 100 100]/Parent 2 0 R>>endobj\n" +
+        "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n" +
+        "0000000058 00000 n \n0000000115 00000 n \n" +
+        "trailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF"
+      );
+      const pdfPath = join(tmpdir(), "test_clarity.pdf");
+      const outPrefix = join(tmpdir(), "test_clarity_out");
+      writeFileSync(pdfPath, minimalPdf);
+      results.pdfWritten = existsSync(pdfPath);
+
+      try {
+        const cmd = `pdftoppm -r 72 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`;
+        results.pdftoppmCmd = cmd;
+        execSync(cmd, { timeout: 15000, stdio: "pipe" });
+        results.pdftoppmExecOk = true;
+      } catch (e: any) {
+        results.pdftoppmExecOk = false;
+        results.pdftoppmError = e.message;
+        results.pdftoppmStderr = e.stderr?.toString?.() ?? "";
+      }
+
+      // Check what files were created
+      const allTmp = readdirSync(tmpdir());
+      results.outputFiles = allTmp.filter((f: string) => f.startsWith("test_clarity_out"));
+
+      // Cleanup
+      try { unlinkSync(pdfPath); } catch {}
+      results.outputFiles.forEach((f: string) => { try { unlinkSync(join(tmpdir(), f)); } catch {} });
+    } catch (e: any) { results.pdftoppmTest = "ERROR: " + e.message; }
+
+    res.status(200).json(results);
+  });
+
   app.get("/api/healthz/db", async (_req, res) => {
     const health = await getDatabaseHealth();
     res.status(health.ok ? 200 : 503).json(health);
