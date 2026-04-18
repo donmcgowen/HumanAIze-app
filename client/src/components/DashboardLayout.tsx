@@ -39,17 +39,22 @@ import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { toast } from "sonner";
 
-const menuItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
-  { icon: LineChart, label: "History", path: "/history" },
-  { icon: Cable, label: "Monitoring", path: "/monitoring" },
-  { icon: Apple, label: "Food Logging", path: "/food-logging" },
-  { icon: Dumbbell, label: "Workouts", path: "/workouts" },
-  { icon: TrendingUp, label: "Progress", path: "/progress" },
-  { icon: Bot, label: "Assistant", path: "/assistant" },
-  { icon: Mail, label: "Weekly Summaries", path: "/summaries" },
-  { icon: HelpCircle, label: "Help", path: "/help" },
+// Set MVP_ONLY to true to show only the 4 core MVP screens in the sidebar
+const MVP_ONLY = false;
+
+const allMenuItems = [
+  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard", mvp: true },
+  { icon: Cable, label: "Monitoring", path: "/monitoring", mvp: true },
+  { icon: Apple, label: "Food Logging", path: "/food-logging", mvp: true },
+  { icon: Dumbbell, label: "Workouts", path: "/workouts", mvp: true },
+  { icon: TrendingUp, label: "Progress", path: "/progress", mvp: false },
+  { icon: LineChart, label: "History", path: "/history", mvp: false },
+  { icon: Bot, label: "Assistant", path: "/assistant", mvp: false },
+  { icon: Mail, label: "Weekly Summaries", path: "/summaries", mvp: false },
+  { icon: HelpCircle, label: "Help", path: "/help", mvp: true },
 ];
+
+const menuItems = MVP_ONLY ? allMenuItems.filter(item => item.mvp) : allMenuItems;
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { loading, user } = useAuth();

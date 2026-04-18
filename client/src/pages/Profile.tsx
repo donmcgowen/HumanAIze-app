@@ -28,7 +28,8 @@ export function Profile() {
   const [bmi, setBmi] = useState<number | null>(null);
   const [bmiCategory, setBmiCategory] = useState<string>("");
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>("moderately_active");
-  
+  const [diabetesType, setDiabetesType] = useState<string>("");
+
   // Maintenance calories state
   const [maintenanceCalories, setMaintenanceCalories] = useState<MacroSuggestion | null>(null);
   const [customMaintenanceCalories, setCustomMaintenanceCalories] = useState<string>("");
@@ -95,6 +96,8 @@ export function Profile() {
       setDailyFatTarget(profile.dailyFatTarget ? profile.dailyFatTarget.toString() : "");
       setGoalWeightLbs(profile.goalWeightLbs ? profile.goalWeightLbs.toString() : "");
       setGoalDate(toDateInputValue(profile.goalDate));
+      if (profile.activityLevel) setActivityLevel(profile.activityLevel as ActivityLevel);
+      if (profile.diabetesType) setDiabetesType(profile.diabetesType);
     }
   }, [profile]);
 
@@ -205,6 +208,8 @@ export function Profile() {
         weightLbs: weightInput,
         ageYears: ageInput,
         fitnessGoal: (formData.fitnessGoal || undefined) as 'lose_fat' | 'build_muscle' | 'maintain' | undefined,
+        activityLevel: activityLevel as 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active' | 'extremely_active',
+        diabetesType: (diabetesType || undefined) as 'type1' | 'type2' | 'prediabetes' | 'gestational' | 'other' | undefined,
         goalWeightLbs: goalWeightVal,
         goalDate: goalDateVal,
         dailyCalorieTarget: effectiveDailyCalorieTarget,
@@ -340,6 +345,28 @@ export function Profile() {
               <SelectItem value="moderately_active">Moderately Active (3-5 days/week)</SelectItem>
               <SelectItem value="very_active">Very Active (6-7 days/week)</SelectItem>
               <SelectItem value="extremely_active">Extremely Active (physical job)</SelectItem>
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
+      {/* Diabetes Type */}
+      <Card className="bg-slate-800 border-slate-700">
+        <CardHeader>
+          <CardTitle>Diabetes Type</CardTitle>
+          <CardDescription>Select your diabetes type for personalized glucose insights (optional)</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Select value={diabetesType} onValueChange={setDiabetesType}>
+            <SelectTrigger className="bg-slate-900 border-white/10 text-white">
+              <SelectValue placeholder="Select diabetes type (optional)" />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-900 border-white/10">
+              <SelectItem value="type1">Type 1 Diabetes</SelectItem>
+              <SelectItem value="type2">Type 2 Diabetes</SelectItem>
+              <SelectItem value="prediabetes">Prediabetes</SelectItem>
+              <SelectItem value="gestational">Gestational Diabetes</SelectItem>
+              <SelectItem value="other">Other</SelectItem>
             </SelectContent>
           </Select>
         </CardContent>

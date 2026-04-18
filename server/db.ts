@@ -246,6 +246,8 @@ SELECT TOP 1
   [cgmAverageGlucose],
   [cgmTimeInRange],
   [cgmA1cEstimate],
+  [activityLevel],
+  [diabetesType],
   [createdAt],
   [updatedAt]
 FROM [dbo].[user_profiles]
@@ -271,6 +273,8 @@ WHERE [userId] = @userId
         cgmAverageGlucose: row.cgmAverageGlucose,
         cgmTimeInRange: row.cgmTimeInRange,
         cgmA1cEstimate: row.cgmA1cEstimate,
+        activityLevel: row.activityLevel ?? "moderately_active",
+        diabetesType: row.diabetesType ?? null,
         createdAt: row.createdAt ? new Date(row.createdAt) : new Date(),
         updatedAt: row.updatedAt ? new Date(row.updatedAt) : new Date(),
       } as UserProfile;
@@ -350,7 +354,7 @@ export async function upsertUserProfile(userId: number, updates: Partial<InsertU
 
     const filteredUpdates = Object.fromEntries(
       Object.entries(updates)
-        .filter(([key, value]) => value !== undefined && key !== "activityLevel")
+        .filter(([key, value]) => value !== undefined)
     ) as Partial<InsertUserProfile>;
 
     try {
@@ -375,6 +379,8 @@ BEGIN
     [cgmAverageGlucose] INT NULL,
     [cgmTimeInRange] FLOAT NULL,
     [cgmA1cEstimate] FLOAT NULL,
+    [activityLevel] NVARCHAR(32) NULL DEFAULT 'moderately_active',
+    [diabetesType] NVARCHAR(32) NULL,
     [createdAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     [updatedAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
   );
@@ -400,6 +406,10 @@ IF COL_LENGTH('dbo.user_profiles', 'cgmTimeInRange') IS NULL
   ALTER TABLE [dbo].[user_profiles] ADD [cgmTimeInRange] FLOAT NULL;
 IF COL_LENGTH('dbo.user_profiles', 'cgmA1cEstimate') IS NULL
   ALTER TABLE [dbo].[user_profiles] ADD [cgmA1cEstimate] FLOAT NULL;
+IF COL_LENGTH('dbo.user_profiles', 'activityLevel') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [activityLevel] NVARCHAR(32) NULL DEFAULT 'moderately_active';
+IF COL_LENGTH('dbo.user_profiles', 'diabetesType') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [diabetesType] NVARCHAR(32) NULL;
       `);
 
       const existsResult = await pool
@@ -453,10 +463,10 @@ IF COL_LENGTH('dbo.user_profiles', 'cgmA1cEstimate') IS NULL
     }
   }
 
-  // Filter out undefined values and activityLevel (not yet in DB)
+  // Filter out undefined values
   const filteredUpdates = Object.fromEntries(
     Object.entries(updates)
-      .filter(([key, value]) => value !== undefined && key !== "activityLevel")
+      .filter(([key, value]) => value !== undefined)
   ) as Partial<InsertUserProfile>;
 
   const existing = await getUserProfile(userId);

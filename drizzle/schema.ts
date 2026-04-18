@@ -199,6 +199,8 @@ export const userProfiles = mysqlTable("user_profiles", {
   cgmAverageGlucose: int("cgmAverageGlucose"),
   cgmTimeInRange: double("cgmTimeInRange"),
   cgmA1cEstimate: double("cgmA1cEstimate"),
+  activityLevel: mysqlEnum("activityLevel", ["sedentary", "lightly_active", "moderately_active", "very_active", "extremely_active"]).default("moderately_active"),
+  diabetesType: mysqlEnum("diabetesType", ["type1", "type2", "prediabetes", "gestational", "other"]),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -230,6 +232,7 @@ export const foodLogs = mysqlTable("food_logs", {
   proteinGrams: double("proteinGrams").notNull(),
   carbsGrams: double("carbsGrams").notNull(),
   fatGrams: double("fatGrams").notNull(),
+  sugarGrams: double("sugarGrams").default(0),
   loggedAt: bigint("loggedAt", { mode: "number" }).notNull(),
   mealType: mysqlEnum("mealType", ["breakfast", "lunch", "dinner", "snack", "other"]).default("other").notNull(),
   notes: text("notes"),
