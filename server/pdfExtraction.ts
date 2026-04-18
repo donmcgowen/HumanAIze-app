@@ -60,7 +60,7 @@ async function pdfPage1ToPNG(pdfBuffer: Buffer): Promise<Buffer | null> {
       try {
         execSync(`${bin} -r 150 -png -f 1 -l 1 "${pdfPath}" "${outPrefix}"`, {
           timeout: 30000,
-          stdio: "pipe",
+          stdio: "ignore",
         });
         succeeded = true;
         break;
@@ -81,7 +81,7 @@ with open('${pdfPath}', 'rb') as f:
 pages = convert_from_bytes(pdf_bytes, dpi=150, first_page=1, last_page=1)
 pages[0].save('${outPrefix}-01.png', 'PNG')
 "`,
-          { timeout: 30000, stdio: "pipe" }
+          { timeout: 30000, stdio: "ignore" }
         );
         succeeded = true;
       } catch {
@@ -263,20 +263,8 @@ export async function parseClarityPDFBuffer(pdfBuffer: Buffer): Promise<Extracte
     // For page-1 PNG, skip trend analysis (no daily charts visible)
     result = await callGemini(pngBuf, "image/png", false);
 
-    // If we got summary stats, also try full PDF for trend insights (async, non-blocking)
-    if (result && pdfBuffer.length <= GEMINI_MAX_RAW_BYTES) {
-      console.log(`[pdfExtraction] Getting trend insights from full PDF...`);
-      try {
-        const trendResult = await callGemini(pdfBuffer, "application/pdf", true);
-        if (trendResult) {
-          // Merge: use page-1 stats (more reliable) + full PDF insights
-          result.insights = trendResult.insights;
-          if (!result.summary && trendResult.summary) result.summary = trendResult.summary;
-        }
-      } catch (err) {
-        console.warn("[pdfExtraction] Trend analysis failed (non-critical):", err instanceof Error ? err.message : err);
-      }
-    }
+    // Note: Full PDF trend analysis removed to avoid Azure timeout (230s limit).
+    // Page-1 PNG contains all summary stats needed.
   } else {
     // Step 2: pdftoppm not available — send full PDF directly
     if (pdfBuffer.length <= GEMINI_MAX_RAW_BYTES) {
