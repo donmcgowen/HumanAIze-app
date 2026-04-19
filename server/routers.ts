@@ -913,18 +913,46 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
 
           const rawContent = result.choices?.[0]?.message?.content ?? "";
           const text = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
-          // Extract JSON array from response
-          const match = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
-          if (match) {
-            const suggestions = JSON.parse(match[0]);
-            return Array.isArray(suggestions) ? suggestions.slice(0, 3) : [];
+          console.log("[AI Meal Suggestions] Raw response (first 500 chars):", text.slice(0, 500));
+
+          // Helper: validate and normalise a suggestion array
+          const normaliseSuggestions = (arr: any[]): any[] =>
+            arr
+              .filter((s: any) => s && typeof s === "object" && s.name)
+              .slice(0, 3)
+              .map((s: any) => ({
+                name: s.name,
+                description: s.description || "",
+                calories: Number(s.calories) || 0,
+                protein: Number(s.protein) || 0,
+                carbs: Number(s.carbs) || 0,
+                fat: Number(s.fat) || 0,
+                mealType: s.mealType || "snack",
+              }));
+
+          // 1. Try to extract a JSON array directly from the text
+          const arrayMatch = text.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+          if (arrayMatch) {
+            try {
+              const arr = JSON.parse(arrayMatch[0]);
+              if (Array.isArray(arr) && arr.length > 0) return normaliseSuggestions(arr);
+            } catch {}
           }
-          // Try parsing entire response as JSON
+
+          // 2. Try parsing the entire response as JSON
           try {
             const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) return parsed.slice(0, 3);
-            if (parsed.suggestions) return parsed.suggestions.slice(0, 3);
+            if (Array.isArray(parsed) && parsed.length > 0) return normaliseSuggestions(parsed);
+            // Common wrapper keys Gemini may use
+            for (const key of ["suggestions", "meals", "meal_suggestions", "data", "results"]) {
+              if (Array.isArray(parsed[key]) && parsed[key].length > 0) return normaliseSuggestions(parsed[key]);
+            }
+            // Single object wrapping an array under any key
+            const firstArrayKey = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
+            if (firstArrayKey && parsed[firstArrayKey].length > 0) return normaliseSuggestions(parsed[firstArrayKey]);
           } catch {}
+
+          console.warn("[AI Meal Suggestions] Could not parse suggestions from response");
           return [];
         } catch (error) {
           console.error("[AI Meal Suggestions] Error:", error);

@@ -416,7 +416,12 @@ export function FoodLogger() {
     refetch: refetchAI,
   } = trpc.food.getAIMealSuggestions.useQuery(
     { startOfDay: dayStart, endOfDay: dayEnd },
-    { enabled: showAISuggestions, staleTime: 5 * 60 * 1000 }
+    {
+      enabled: showAISuggestions,
+      staleTime: 0,           // never cache — always fetch fresh on demand
+      retry: 1,
+      refetchOnWindowFocus: false,
+    }
   );
 
   const toPositiveNumberOrNull = (value: unknown): number | null => {
