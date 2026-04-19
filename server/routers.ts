@@ -39,6 +39,7 @@ import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnaly
 import { searchFoodWithGemini, calculateMacrosForServing } from "./geminiFood";
 import { getLocalCachedFood, saveLocalCachedFood, clearGenericCacheEntries, clearLocalCachedFood } from "./localFoodCache";
 import { searchOpenFoodFactsByName } from "./openFoodFacts";
+import { ENV } from "./_core/env";
 
 const rangeInput = z.object({
   rangeDays: z.number().int().min(7).max(30).default(14),

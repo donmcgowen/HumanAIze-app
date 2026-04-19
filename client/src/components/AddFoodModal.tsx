@@ -667,7 +667,7 @@ function ManualEntryTab({ onFoodAdded, onClose, mealType = "meal" }: ManualEntry
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Unified Gemini AI Scanner Tab
-// Handles: barcode, product label / nutrition facts, or meal plate photo
+// Handles: auto-barcode detection → instant lookup, then Gemini for labels/plates
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface GeminiScanTabProps {
@@ -697,12 +697,22 @@ interface ScannedFoodItem {
 }
 
 function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
+  // phase: capture → (barcode auto-detected OR user taps Capture) → analyzing → results
+  // barcodePhase: "scanning" | "found" | "loading" | "done"
   const [phase, setPhase] = useState<"capture" | "analyzing" | "results">("capture");
+  const [barcodeStatus, setBarcodeStatus] = useState<"scanning" | "found" | "loading" | "none">("scanning");
+  const [detectedBarcode, setDetectedBarcode] = useState<string | null>(null);
+  const [barcodeProduct, setBarcodeProduct] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<ScannedFoodItem[]>([]);
   const [mealName, setMealName] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [showCaptureButton, setShowCaptureButton] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const barcodeDetectorRef = useRef<InstanceType<NonNullable<typeof window.BarcodeDetector>> | null>(null);
+  const barcodeLoopRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastBarcodeRef = useRef<string | null>(null);
+  const captureButtonTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
@@ -711,7 +721,28 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
 
   const analyzeMutation = trpc.food.analyzeMealPhoto.useMutation();
 
-  // Start live camera when component mounts
+  // Barcode lookup query — enabled only when a barcode has been detected
+  const barcodeLookup = trpc.food.lookupBarcode.useQuery(
+    { barcode: detectedBarcode ?? "" },
+    { enabled: !!detectedBarcode && barcodeStatus === "loading" }
+  );
+
+  // When barcode lookup resolves, populate the product card
+  useEffect(() => {
+    if (!barcodeLookup.data) return;
+    setBarcodeProduct(barcodeLookup.data);
+    setBarcodeStatus("found");
+  }, [barcodeLookup.data]);
+
+  // If barcode lookup errors, fall back to Gemini capture
+  useEffect(() => {
+    if (barcodeLookup.error && barcodeStatus === "loading") {
+      setBarcodeStatus("none");
+      setDetectedBarcode(null);
+    }
+  }, [barcodeLookup.error, barcodeStatus]);
+
+  // Start live camera when component mounts (capture phase only)
   useEffect(() => {
     let mounted = true;
     const startCamera = async () => {
@@ -740,6 +771,66 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
     };
   }, [phase]);
 
+  // Barcode detection loop — runs every 500ms while camera is active and no barcode found yet
+  useEffect(() => {
+    if (phase !== "capture" || !cameraActive || barcodeStatus === "found" || barcodeStatus === "loading") return;
+    if (!("BarcodeDetector" in window)) {
+      // Browser doesn't support BarcodeDetector — skip straight to capture button
+      setBarcodeStatus("none");
+      return;
+    }
+    try {
+      barcodeDetectorRef.current = new (window as any).BarcodeDetector({
+        formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code"],
+      });
+    } catch {
+      setBarcodeStatus("none");
+      return;
+    }
+    const detect = async () => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const detector = barcodeDetectorRef.current;
+      if (!video || !canvas || !detector || video.readyState < 2) return;
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0);
+      try {
+        const barcodes = await detector.detect(canvas);
+        if (barcodes.length > 0) {
+          const code = barcodes[0].rawValue;
+          if (code && code !== lastBarcodeRef.current) {
+            lastBarcodeRef.current = code;
+            setDetectedBarcode(code);
+            setBarcodeStatus("loading");
+            // Stop the loop
+            if (barcodeLoopRef.current) clearInterval(barcodeLoopRef.current);
+            // Stop the capture-button timer
+            if (captureButtonTimerRef.current) clearTimeout(captureButtonTimerRef.current);
+          }
+        }
+      } catch { /* ignore detection errors */ }
+    };
+    barcodeLoopRef.current = setInterval(detect, 500);
+    return () => {
+      if (barcodeLoopRef.current) clearInterval(barcodeLoopRef.current);
+    };
+  }, [phase, cameraActive, barcodeStatus]);
+
+  // 3-second timer: if no barcode detected, show the Capture button
+  useEffect(() => {
+    if (phase !== "capture" || !cameraActive || barcodeStatus !== "scanning") return;
+    captureButtonTimerRef.current = setTimeout(() => {
+      setBarcodeStatus(prev => prev === "scanning" ? "none" : prev);
+      setShowCaptureButton(true);
+    }, 3000);
+    return () => {
+      if (captureButtonTimerRef.current) clearTimeout(captureButtonTimerRef.current);
+    };
+  }, [phase, cameraActive, barcodeStatus]);
+
   const captureAndAnalyze = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -755,7 +846,9 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
     setPreviewUrl(dataUrl);
     const base64 = dataUrl.split(",")[1];
 
-    // Stop camera
+    // Stop camera and barcode loop
+    if (barcodeLoopRef.current) clearInterval(barcodeLoopRef.current);
+    if (captureButtonTimerRef.current) clearTimeout(captureButtonTimerRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -803,6 +896,8 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
     previewReader.onload = (e) => setPreviewUrl(e.target?.result as string);
     previewReader.readAsDataURL(file);
 
+    if (barcodeLoopRef.current) clearInterval(barcodeLoopRef.current);
+    if (captureButtonTimerRef.current) clearTimeout(captureButtonTimerRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
@@ -844,6 +939,13 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
     setPreviewUrl(null);
     setError(null);
     setMealName("");
+    setBarcodeStatus("scanning");
+    setDetectedBarcode(null);
+    setBarcodeProduct(null);
+    setShowCaptureButton(false);
+    lastBarcodeRef.current = null;
+    if (barcodeLoopRef.current) clearInterval(barcodeLoopRef.current);
+    if (captureButtonTimerRef.current) clearTimeout(captureButtonTimerRef.current);
   }, []);
 
   const toggleItem = (id: string) => {
@@ -883,8 +985,93 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
     onClose();
   };
 
+  // ── Barcode product add handler ──
+  const handleAddBarcodeProduct = () => {
+    if (!barcodeProduct) return;
+    const p = barcodeProduct;
+    onFoodAdded({
+      foodName: p.name,
+      servingSize: `${p.servingSize ?? 1} ${p.servingUnit ?? p.defaultUnit ?? "serving"}`,
+      calories: Number(p.calories) || 0,
+      proteinGrams: Number(p.proteinGrams) || 0,
+      carbsGrams: Number(p.carbsGrams) || 0,
+      fatGrams: Number(p.fatGrams) || 0,
+    });
+    toast.success(`Added ${p.name} to ${mealType}`);
+    onClose();
+  };
+
   // ── Phase: capture ──
   if (phase === "capture") {
+    // ── Barcode found: show product card ──
+    if (barcodeStatus === "found" && barcodeProduct) {
+      const p = barcodeProduct;
+      return (
+        <div className="space-y-3">
+          {/* Green success banner */}
+          <div className="flex items-center gap-2 p-3 bg-green-500/15 border border-green-500/40 rounded-lg">
+            <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-sm font-medium text-green-400">Barcode detected!</span>
+            <span className="text-xs text-gray-400 ml-auto">{detectedBarcode}</span>
+          </div>
+
+          {/* Product card */}
+          <div className="p-4 bg-gray-800 border border-gray-700 rounded-xl space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-semibold text-white text-base">{p.name}</p>
+                <p className="text-xs text-gray-400 mt-0.5">Serving: {p.servingSize} {p.servingUnit ?? p.defaultUnit ?? "g"}</p>
+              </div>
+              <span className="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-1 rounded-full shrink-0">Product Found</span>
+            </div>
+
+            {/* Macro grid */}
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { label: "Calories", value: p.calories, color: "text-white", unit: "" },
+                { label: "Protein", value: p.proteinGrams, color: "text-cyan-400", unit: "g" },
+                { label: "Carbs", value: p.carbsGrams, color: "text-yellow-400", unit: "g" },
+                { label: "Fat", value: p.fatGrams, color: "text-orange-400", unit: "g" },
+              ].map(m => (
+                <div key={m.label} className="bg-gray-900 rounded-lg p-2 text-center">
+                  <p className="text-gray-500 text-[10px] mb-0.5">{m.label}</p>
+                  <p className={`font-bold text-sm ${m.color}`}>{Math.round(Number(m.value) || 0)}{m.unit}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <Button
+            onClick={handleAddBarcodeProduct}
+            className="w-full bg-green-600 hover:bg-green-700 text-white h-12 text-base font-semibold"
+          >
+            <CheckCircle className="h-5 w-5 mr-2" />
+            Add to {mealType.charAt(0).toUpperCase() + mealType.slice(1)}
+          </Button>
+          <Button variant="outline" onClick={resetScanner} className="w-full text-sm">
+            Scan Another Item
+          </Button>
+        </div>
+      );
+    }
+
+    // ── Barcode loading: looking up product ──
+    if (barcodeStatus === "loading") {
+      return (
+        <div className="flex flex-col items-center gap-4 py-10">
+          <div className="w-12 h-12 rounded-full bg-cyan-500/20 flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />
+          </div>
+          <div className="text-center">
+            <p className="text-sm font-medium text-white">Looking up barcode...</p>
+            <p className="text-xs text-gray-400 mt-1 font-mono">{detectedBarcode}</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Default: camera viewfinder with smart status overlay ──
     return (
       <div className="space-y-3">
         {(error || cameraError) && (
@@ -896,18 +1083,15 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
 
         {/* Live camera viewfinder */}
         <div className="relative w-full rounded-xl overflow-hidden bg-gray-900 border border-gray-700" style={{ aspectRatio: "4/3" }}>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
+          <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+
+          {/* Camera loading spinner */}
           {!cameraActive && !cameraError && (
             <div className="absolute inset-0 flex items-center justify-center">
               <Loader2 className="h-8 w-8 animate-spin text-cyan-400" />
             </div>
           )}
+
           {/* Corner guides */}
           <div className="absolute inset-0 pointer-events-none">
             <div className="absolute top-3 left-3 w-8 h-8 border-t-2 border-l-2 border-cyan-400 rounded-tl" />
@@ -915,22 +1099,45 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
             <div className="absolute bottom-3 left-3 w-8 h-8 border-b-2 border-l-2 border-cyan-400 rounded-bl" />
             <div className="absolute bottom-3 right-3 w-8 h-8 border-b-2 border-r-2 border-cyan-400 rounded-br" />
           </div>
+
+          {/* Barcode scanning status badge */}
+          {cameraActive && barcodeStatus === "scanning" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full">
+              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-xs text-green-300 font-medium">Scanning for barcode...</span>
+            </div>
+          )}
+
+          {/* Gemini ready badge (after 3s, no barcode) */}
+          {cameraActive && barcodeStatus === "none" && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-purple-900/70 backdrop-blur-sm px-3 py-1.5 rounded-full">
+              <div className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+              <span className="text-xs text-purple-300 font-medium">Gemini ready</span>
+            </div>
+          )}
         </div>
 
         <canvas ref={canvasRef} className="hidden" />
 
+        {/* Smart status message */}
         <p className="text-xs text-gray-400 text-center">
-          Point at a barcode, nutrition label, or plate of food
+          {barcodeStatus === "scanning"
+            ? "Auto-detecting barcode — or point at a nutrition label / food plate"
+            : "No barcode found — capture for Gemini AI analysis"}
         </p>
 
-        {/* Capture button */}
+        {/* Capture button — always shown but more prominent after 3s */}
         <Button
           onClick={captureAndAnalyze}
           disabled={!cameraActive}
-          className="w-full bg-cyan-600 hover:bg-cyan-700 text-white h-12 text-base font-semibold"
+          className={`w-full text-white h-12 text-base font-semibold transition-all ${
+            showCaptureButton || barcodeStatus === "none"
+              ? "bg-purple-600 hover:bg-purple-700 scale-100"
+              : "bg-cyan-800/60 hover:bg-cyan-700 scale-95 opacity-70"
+          }`}
         >
           <Camera className="h-5 w-5 mr-2" />
-          Capture &amp; Analyze
+          {showCaptureButton || barcodeStatus === "none" ? "Capture & Analyze with Gemini" : "Capture & Analyze"}
         </Button>
 
         {/* Upload fallback */}
@@ -939,7 +1146,7 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
           onClick={() => fileInputRef.current?.click()}
           className="w-full"
         >
-          Upload Photo Instead
+          Upload Photo
         </Button>
         <input
           ref={fileInputRef}
@@ -953,7 +1160,7 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
           }}
         />
 
-        <p className="text-xs text-gray-500 text-center">Powered by Gemini 2.5 Flash · Results are AI estimates</p>
+        <p className="text-xs text-gray-500 text-center">Powered by Gemini 2.0 Flash · Results are AI estimates</p>
       </div>
     );
   }
