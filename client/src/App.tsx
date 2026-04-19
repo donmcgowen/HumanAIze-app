@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const History = lazy(() => import("./pages/History"));
 const Sources = lazy(() => import("./pages/Sources"));
 const Assistant = lazy(() => import("./pages/Assistant"));
+const AppFeedback = lazy(() => import("./pages/AppFeedback").then((m) => ({ default: m.AppFeedback })));
 const Summaries = lazy(() => import("./pages/Summaries"));
 const Profile = lazy(() => import("./pages/Profile").then((m) => ({ default: m.Profile })));
 const FoodLogging = lazy(() => import("./pages/FoodLogging").then((m) => ({ default: m.FoodLogging })));
@@ -45,6 +46,7 @@ function Router() {
         <Route path={"/profile"} component={() => <DashboardLayout><Profile /></DashboardLayout>} />
         <Route path={"/progress"} component={() => <DashboardLayout><Progress /></DashboardLayout>} />
         <Route path={"/assistant"} component={() => <DashboardLayout><Assistant /></DashboardLayout>} />
+        <Route path={"/feedback"} component={() => <DashboardLayout><AppFeedback /></DashboardLayout>} />
         <Route path={"/summaries"} component={() => <DashboardLayout><Summaries /></DashboardLayout>} />
         <Route path={"/help"} component={() => <DashboardLayout><Help /></DashboardLayout>} />
         <Route path={"/404"} component={NotFound} />

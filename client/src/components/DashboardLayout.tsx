@@ -28,6 +28,7 @@ import {
   X,
   ChevronRight,
   Settings,
+  MessageSquarePlus,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -46,7 +47,7 @@ const allMenuItems = [
   { icon: Apple, label: "Food Logging", path: "/food-logging", mvp: true },
   { icon: Dumbbell, label: "Workouts", path: "/workouts", mvp: true },
   { icon: TrendingUp, label: "Progress", path: "/progress", mvp: false },
-  { icon: Bot, label: "Assistant", path: "/assistant", mvp: false },
+  { icon: MessageSquarePlus, label: "App Feedback", path: "/feedback", mvp: false },
   { icon: Mail, label: "Weekly Summaries", path: "/summaries", mvp: false },
   { icon: HelpCircle, label: "Help", path: "/help", mvp: true },
 ];
