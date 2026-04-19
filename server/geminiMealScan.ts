@@ -1,12 +1,15 @@
 /**
- * AI Food Scanner — uses invokeLLM (OpenAI-compatible endpoint) for vision tasks.
+ * AI Food Scanner — uses Gemini REST API directly for vision tasks.
  *
  * Handles two scan modes:
  *  - "product": Reads a nutrition label / product box → returns single food item with per-serving macros
  *  - "meal":    Analyzes a plate of food → returns multiple food items with individual macros
  */
 
-import { invokeLLM } from "./_core/llm";
+import { ENV } from "./_core/env";
+
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 export interface MealFoodItem {
   name: string;
@@ -83,29 +86,53 @@ Return ONLY valid JSON with no markdown fences:
 
 Be realistic with portion sizes. Always return valid JSON.`;
 
-async function callVisionLLM(
+async function callGeminiVision(
   imageBase64: string,
   mimeType: string,
   prompt: string
 ): Promise<any> {
-  const dataUrl = `data:${mimeType};base64,${imageBase64}`;
+  const geminiKey = ENV.geminiApiKey;
+  if (!geminiKey) {
+    throw new Error("GEMINI_API_KEY is not configured on the server.");
+  }
 
-  const result = await invokeLLM({
-    messages: [
+  const url = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${geminiKey}`;
+
+  const requestBody = {
+    contents: [
       {
-        role: "user" as const,
-        content: [
-          { type: "text" as const, text: prompt },
-          { type: "image_url" as const, image_url: { url: dataUrl, detail: "high" as const } },
+        parts: [
+          { text: prompt },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: imageBase64,
+            },
+          },
         ],
       },
     ],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 2048,
+    },
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
   });
 
-  const responseText: string =
-    result?.choices?.[0]?.message?.content ?? "";
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini API error: ${response.status} ${response.statusText} – ${errorText}`);
+  }
 
-  if (!responseText) throw new Error("No response from vision LLM.");
+  const data = await response.json() as any;
+  const responseText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+  if (!responseText) throw new Error("No response from Gemini vision API.");
 
   const cleaned = responseText
     .replace(/```json\s*/gi, "")
@@ -113,7 +140,7 @@ async function callVisionLLM(
     .trim();
 
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not parse LLM response as JSON.");
+  if (!jsonMatch) throw new Error("Could not parse Gemini response as JSON.");
 
   return JSON.parse(jsonMatch[0]);
 }
@@ -126,7 +153,7 @@ export async function scanProductLabel(
   imageBase64: string,
   mimeType: string = "image/jpeg"
 ): Promise<MealScanResult> {
-  const parsed = await callVisionLLM(imageBase64, mimeType, PRODUCT_PROMPT);
+  const parsed = await callGeminiVision(imageBase64, mimeType, PRODUCT_PROMPT);
 
   const item: MealFoodItem = {
     name: String(parsed.productName ?? "Scanned Product"),
@@ -159,7 +186,7 @@ export async function analyzeMealPhotoWithGemini(
   imageBase64: string,
   mimeType: string = "image/jpeg"
 ): Promise<MealScanResult> {
-  const parsed = await callVisionLLM(imageBase64, mimeType, MEAL_PROMPT);
+  const parsed = await callGeminiVision(imageBase64, mimeType, MEAL_PROMPT);
 
   const items: MealFoodItem[] = (parsed.items ?? []).map((item: any) => ({
     name: String(item.name ?? "Unknown food"),

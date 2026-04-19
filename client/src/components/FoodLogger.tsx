@@ -1,7 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, Check, X, Loader2, Star, ChevronLeft, ChevronRight, Calendar, Sparkles, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, Loader2, Star, ChevronLeft, ChevronRight, Calendar, Sparkles, RefreshCw, Copy, BookmarkPlus } from "lucide-react";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { AddFoodModal } from "./AddFoodModal";
@@ -83,6 +83,294 @@ function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCi
   );
 }
 
+// ── CopyMealModal ─────────────────────────────────────────────────────────────
+
+interface CopyMealModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  sourceMeal: MealType;
+  foods: any[];
+  onCopy: (selectedFoodIds: number[], destinationMeal: MealType) => void;
+}
+
+function CopyMealModal({ isOpen, onClose, sourceMeal, foods, onCopy }: CopyMealModalProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [destination, setDestination] = useState<MealType>("dinner");
+
+  if (!isOpen) return null;
+
+  const toggleFood = (id: number) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const handleCopy = () => {
+    if (selectedIds.size === 0) {
+      toast.error("Select at least one food to copy");
+      return;
+    }
+    onCopy(Array.from(selectedIds), destination);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <h3 className="font-bold text-white text-base">Copy from {sourceMeal.charAt(0).toUpperCase() + sourceMeal.slice(1)}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {foods.length === 0 ? (
+            <p className="text-slate-400 text-sm text-center py-4">No foods in this meal to copy.</p>
+          ) : (
+            <>
+              <p className="text-slate-400 text-xs mb-2">Select foods to copy:</p>
+              {foods.map((food: any) => (
+                <label key={food.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/60 cursor-pointer hover:bg-slate-700/60 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(food.id)}
+                    onChange={() => toggleFood(food.id)}
+                    className="w-4 h-4 accent-cyan-400"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-medium truncate">{food.foodName}</div>
+                    <div className="text-slate-500 text-xs">{food.calories} cal · {food.proteinGrams}g P · {food.carbsGrams}g C · {food.fatGrams}g F</div>
+                  </div>
+                </label>
+              ))}
+            </>
+          )}
+
+          <div className="pt-2">
+            <p className="text-slate-400 text-xs mb-2">Copy to meal:</p>
+            <div className="grid grid-cols-2 gap-2">
+              {MEAL_SECTIONS.filter(s => s.value !== sourceMeal).map(s => (
+                <button
+                  key={s.value}
+                  onClick={() => setDestination(s.value)}
+                  className={`py-2 px-3 rounded-lg text-sm font-semibold transition-colors ${
+                    destination === s.value
+                      ? "bg-cyan-600 text-white"
+                      : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-3 px-5 py-4 border-t border-white/10">
+          <Button variant="ghost" onClick={onClose} className="flex-1 text-slate-300">Cancel</Button>
+          <Button
+            onClick={handleCopy}
+            disabled={selectedIds.size === 0}
+            className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-40"
+          >
+            Copy {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DeleteMealModal ───────────────────────────────────────────────────────────
+
+interface DeleteMealModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  mealLabel: string;
+  foods: any[];
+  onDelete: (selectedFoodIds: number[]) => void;
+}
+
+function DeleteMealModal({ isOpen, onClose, mealLabel, foods, onDelete }: DeleteMealModalProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  if (!isOpen) return null;
+
+  const toggleFood = (id: number) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  const selectAll = () => setSelectedIds(new Set(foods.map((f: any) => f.id)));
+  const clearAll = () => setSelectedIds(new Set());
+
+  const handleDelete = () => {
+    if (selectedIds.size === 0) {
+      toast.error("Select at least one food to delete");
+      return;
+    }
+    onDelete(Array.from(selectedIds));
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <h3 className="font-bold text-white text-base">Delete from {mealLabel}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
+          {foods.length === 0 ? (
+            <p className="text-slate-400 text-sm text-center py-4">No foods in this meal.</p>
+          ) : (
+            <>
+              <div className="flex gap-2 mb-3">
+                <button onClick={selectAll} className="text-xs text-cyan-400 hover:text-cyan-300">Select All</button>
+                <span className="text-slate-600">·</span>
+                <button onClick={clearAll} className="text-xs text-slate-400 hover:text-slate-300">Clear</button>
+              </div>
+              {foods.map((food: any) => (
+                <label key={food.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/60 cursor-pointer hover:bg-slate-700/60 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(food.id)}
+                    onChange={() => toggleFood(food.id)}
+                    className="w-4 h-4 accent-red-400"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-medium truncate">{food.foodName}</div>
+                    <div className="text-slate-500 text-xs">{food.calories} cal · {food.proteinGrams}g P · {food.carbsGrams}g C · {food.fatGrams}g F</div>
+                  </div>
+                </label>
+              ))}
+            </>
+          )}
+        </div>
+
+        <div className="flex gap-3 px-5 py-4 border-t border-white/10">
+          <Button variant="ghost" onClick={onClose} className="flex-1 text-slate-300">Cancel</Button>
+          <Button
+            onClick={handleDelete}
+            disabled={selectedIds.size === 0}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white disabled:opacity-40"
+          >
+            Delete {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SaveMealModal ─────────────────────────────────────────────────────────────
+
+interface SaveMealModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  mealLabel: string;
+  foods: any[];
+  onSave: (mealName: string) => void;
+}
+
+function SaveMealModal({ isOpen, onClose, mealLabel, foods, onSave }: SaveMealModalProps) {
+  const [mealName, setMealName] = useState("");
+
+  if (!isOpen) return null;
+
+  const totalCalories = foods.reduce((s: number, f: any) => s + (f.calories || 0), 0);
+  const totalProtein = foods.reduce((s: number, f: any) => s + (f.proteinGrams || 0), 0);
+  const totalCarbs = foods.reduce((s: number, f: any) => s + (f.carbsGrams || 0), 0);
+  const totalFat = foods.reduce((s: number, f: any) => s + (f.fatGrams || 0), 0);
+
+  const handleSave = () => {
+    if (!mealName.trim()) {
+      toast.error("Enter a name for this meal");
+      return;
+    }
+    if (foods.length === 0) {
+      toast.error("No foods in this meal to save");
+      return;
+    }
+    onSave(mealName.trim());
+    setMealName("");
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+          <h3 className="font-bold text-white text-base">Save {mealLabel} as Meal Template</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Macro summary */}
+          <div className="grid grid-cols-4 gap-2 p-3 bg-slate-800/60 rounded-lg">
+            {[
+              { label: "Cal", value: Math.round(totalCalories), color: "text-green-400" },
+              { label: "Protein", value: `${Math.round(totalProtein)}g`, color: "text-orange-400" },
+              { label: "Carbs", value: `${Math.round(totalCarbs)}g`, color: "text-slate-300" },
+              { label: "Fat", value: `${Math.round(totalFat)}g`, color: "text-slate-300" },
+            ].map(m => (
+              <div key={m.label} className="text-center">
+                <div className={`font-bold text-sm ${m.color}`}>{m.value}</div>
+                <div className="text-slate-500 text-xs">{m.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Foods list */}
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {foods.map((food: any) => (
+              <div key={food.id} className="text-sm text-slate-300 py-1 border-b border-white/5 last:border-0">
+                {food.foodName} <span className="text-slate-500 text-xs">({food.calories} cal)</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Meal name input */}
+          <div>
+            <label className="text-slate-400 text-xs mb-1 block">Meal Template Name</label>
+            <Input
+              value={mealName}
+              onChange={(e) => setMealName(e.target.value)}
+              placeholder={`e.g., My ${mealLabel} Combo`}
+              className="bg-white/10 border-white/20 text-white"
+              onKeyDown={(e) => e.key === "Enter" && handleSave()}
+              autoFocus
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-3 px-5 py-4 border-t border-white/10">
+          <Button variant="ghost" onClick={onClose} className="flex-1 text-slate-300">Cancel</Button>
+          <Button
+            onClick={handleSave}
+            disabled={!mealName.trim() || foods.length === 0}
+            className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-40"
+          >
+            Save Template
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── FoodLogger ────────────────────────────────────────────────────────────────
 
 export function FoodLogger() {
@@ -102,6 +390,11 @@ export function FoodLogger() {
   const [editValues, setEditValues] = useState<Record<number, any>>({});
   const [showAddFoodModal, setShowAddFoodModal] = useState(false);
   const [activeMealType, setActiveMealType] = useState<MealType>("breakfast");
+
+  // ── Toolbar modal state ──
+  const [copyModal, setCopyModal] = useState<{ open: boolean; meal: MealType }>({ open: false, meal: "breakfast" });
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; meal: MealType; label: string }>({ open: false, meal: "breakfast", label: "Breakfast" });
+  const [saveModal, setSaveModal] = useState<{ open: boolean; meal: MealType; label: string }>({ open: false, meal: "breakfast", label: "Breakfast" });
 
   // ── Queries ──
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
@@ -162,6 +455,11 @@ export function FoodLogger() {
   });
   const deleteFavoriteMutation = trpc.food.deleteFavorite.useMutation({
     onSuccess: () => { refetchFavorites(); toast.success("Removed from favorites"); },
+  });
+
+  const createMealMutation = trpc.food.createMeal.useMutation({
+    onSuccess: () => toast.success("Meal template saved!"),
+    onError: () => toast.error("Failed to save meal template"),
   });
 
   // ── Computed values ──
@@ -264,6 +562,72 @@ export function FoodLogger() {
   const openAddFood = (meal: MealType) => {
     setActiveMealType(meal);
     setShowAddFoodModal(true);
+  };
+
+  // ── Toolbar handlers ──
+  const handleCopyFoods = async (selectedFoodIds: number[], destinationMeal: MealType) => {
+    const sourceFoods = Object.values(foodsByMeal).flat() as any[];
+    const foodsToCopy = sourceFoods.filter((f: any) => selectedFoodIds.includes(f.id));
+    const loggedAt = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 12, 0, 0, 0).getTime();
+
+    let copied = 0;
+    for (const food of foodsToCopy) {
+      try {
+        await addFoodLog.mutateAsync({
+          foodName: food.foodName,
+          servingSize: food.servingSize || "1 serving",
+          calories: food.calories,
+          proteinGrams: food.proteinGrams,
+          carbsGrams: food.carbsGrams,
+          fatGrams: food.fatGrams,
+          mealType: destinationMeal,
+          loggedAt,
+          notes: food.notes,
+        });
+        copied++;
+      } catch (e) {
+        console.error("Failed to copy food", food.foodName, e);
+      }
+    }
+    refetch();
+    toast.success(`Copied ${copied} item${copied !== 1 ? "s" : ""} to ${destinationMeal}`);
+  };
+
+  const handleDeleteFoods = async (selectedFoodIds: number[]) => {
+    let deleted = 0;
+    for (const id of selectedFoodIds) {
+      try {
+        await deleteFoodLog.mutateAsync({ foodLogId: id });
+        deleted++;
+      } catch (e) {
+        console.error("Failed to delete food", id, e);
+      }
+    }
+    refetch();
+    toast.success(`Deleted ${deleted} item${deleted !== 1 ? "s" : ""}`);
+  };
+
+  const handleSaveMeal = (meal: MealType, mealName: string) => {
+    const foods = foodsByMeal[meal] || [];
+    const totalCalories = foods.reduce((s: number, f: any) => s + (f.calories || 0), 0);
+    const totalProtein = foods.reduce((s: number, f: any) => s + (f.proteinGrams || 0), 0);
+    const totalCarbs = foods.reduce((s: number, f: any) => s + (f.carbsGrams || 0), 0);
+    const totalFat = foods.reduce((s: number, f: any) => s + (f.fatGrams || 0), 0);
+
+    createMealMutation.mutate({
+      mealName,
+      totalCalories: Math.round(totalCalories),
+      totalProteinGrams: Math.round(totalProtein * 10) / 10,
+      totalCarbsGrams: Math.round(totalCarbs * 10) / 10,
+      totalFatGrams: Math.round(totalFat * 10) / 10,
+      foods: foods.map((f: any) => ({
+        foodName: f.foodName,
+        calories: f.calories,
+        protein: f.proteinGrams,
+        carbs: f.carbsGrams,
+        fat: f.fatGrams,
+      })),
+    } as any);
   };
 
   if (isLoading) {
@@ -461,9 +825,35 @@ export function FoodLogger() {
             {/* Section header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
               <span className="font-bold text-cyan-400 tracking-widest text-sm">{label}</span>
-              <span className="text-slate-400 text-sm font-medium">
-                {calories > 0 ? `${Math.round(calories)} Cal` : "0 Cal"}
-              </span>
+              <div className="flex items-center gap-1">
+                {/* Save as Meal Template */}
+                <button
+                  onClick={() => setSaveModal({ open: true, meal, label: label.charAt(0) + label.slice(1).toLowerCase() })}
+                  title="Save as meal template"
+                  className="text-slate-500 hover:text-cyan-400 transition-colors p-1.5 rounded hover:bg-white/5"
+                >
+                  <BookmarkPlus className="h-4 w-4" />
+                </button>
+                {/* Copy foods */}
+                <button
+                  onClick={() => setCopyModal({ open: true, meal })}
+                  title="Copy foods to another meal"
+                  className="text-slate-500 hover:text-cyan-400 transition-colors p-1.5 rounded hover:bg-white/5"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+                {/* Delete foods */}
+                <button
+                  onClick={() => setDeleteModal({ open: true, meal, label: label.charAt(0) + label.slice(1).toLowerCase() })}
+                  title="Delete foods from this meal"
+                  className="text-slate-500 hover:text-red-400 transition-colors p-1.5 rounded hover:bg-white/5"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <span className="text-slate-400 text-sm font-medium ml-2">
+                  {calories > 0 ? `${Math.round(calories)} Cal` : "0 Cal"}
+                </span>
+              </div>
             </div>
 
             {/* Food items */}
@@ -574,6 +964,31 @@ export function FoodLogger() {
           </div>
         );
       })}
+
+      {/* ── Toolbar Modals ── */}
+      <CopyMealModal
+        isOpen={copyModal.open}
+        onClose={() => setCopyModal({ ...copyModal, open: false })}
+        sourceMeal={copyModal.meal}
+        foods={foodsByMeal[copyModal.meal] || []}
+        onCopy={handleCopyFoods}
+      />
+
+      <DeleteMealModal
+        isOpen={deleteModal.open}
+        onClose={() => setDeleteModal({ ...deleteModal, open: false })}
+        mealLabel={deleteModal.label}
+        foods={foodsByMeal[deleteModal.meal] || []}
+        onDelete={handleDeleteFoods}
+      />
+
+      <SaveMealModal
+        isOpen={saveModal.open}
+        onClose={() => setSaveModal({ ...saveModal, open: false })}
+        mealLabel={saveModal.label}
+        foods={foodsByMeal[saveModal.meal] || []}
+        onSave={(mealName) => handleSaveMeal(saveModal.meal, mealName)}
+      />
 
       {/* Add Food Modal */}
       <AddFoodModal

@@ -220,12 +220,6 @@ const resolveApiUrl = () => {
   return "https://api.openai.com/v1/chat/completions";
 };
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("BUILT_IN_FORGE_API_KEY (LLM API key) is not configured");
-  }
-};
-
 const normalizeResponseFormat = ({
   responseFormat,
   response_format,
@@ -271,8 +265,136 @@ const normalizeResponseFormat = ({
   };
 };
 
+/**
+ * Convert OpenAI-style messages to Gemini API format.
+ * Handles text-only and multimodal (image) messages.
+ */
+function convertMessagesToGemini(messages: Message[]): any[] {
+  const geminiContents: any[] = [];
+
+  for (const msg of messages) {
+    // Skip system messages — prepend to first user message instead
+    if (msg.role === "system") continue;
+
+    const role = msg.role === "assistant" ? "model" : "user";
+    const parts: any[] = [];
+
+    const contentArray = ensureArray(msg.content);
+    for (const part of contentArray) {
+      if (typeof part === "string") {
+        parts.push({ text: part });
+      } else if (part.type === "text") {
+        parts.push({ text: part.text });
+      } else if (part.type === "image_url") {
+        const url = part.image_url.url;
+        // Handle base64 data URLs
+        if (url.startsWith("data:")) {
+          const [header, data] = url.split(",");
+          const mimeType = header.replace("data:", "").replace(";base64", "");
+          parts.push({ inline_data: { mime_type: mimeType, data } });
+        } else {
+          // External URL — use as text reference (Gemini doesn't support external image URLs directly)
+          parts.push({ text: `[Image: ${url}]` });
+        }
+      }
+    }
+
+    if (parts.length > 0) {
+      geminiContents.push({ role, parts });
+    }
+  }
+
+  // Prepend system message content to first user message if present
+  const systemMsg = messages.find(m => m.role === "system");
+  if (systemMsg && geminiContents.length > 0) {
+    const systemText = ensureArray(systemMsg.content)
+      .map(p => (typeof p === "string" ? p : p.type === "text" ? p.text : ""))
+      .join("\n");
+    const firstUserMsg = geminiContents.find(c => c.role === "user");
+    if (firstUserMsg) {
+      firstUserMsg.parts.unshift({ text: systemText + "\n\n" });
+    }
+  }
+
+  return geminiContents;
+}
+
+/**
+ * Call Gemini API directly as a fallback when the forge API is unavailable.
+ */
+async function invokeGeminiFallback(params: InvokeParams): Promise<InvokeResult> {
+  const geminiKey = ENV.geminiApiKey;
+  if (!geminiKey) {
+    throw new Error("Neither forge API nor GEMINI_API_KEY is available for LLM calls.");
+  }
+
+  const GEMINI_MODEL = "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`;
+
+  const contents = convertMessagesToGemini(params.messages);
+
+  const requestBody: any = {
+    contents,
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+    },
+  };
+
+  // Handle JSON response format
+  const normalizedFormat = normalizeResponseFormat({
+    responseFormat: params.responseFormat,
+    response_format: params.response_format,
+    outputSchema: params.outputSchema,
+    output_schema: params.output_schema,
+  });
+  if (normalizedFormat?.type === "json_object" || normalizedFormat?.type === "json_schema") {
+    requestBody.generationConfig.responseMimeType = "application/json";
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini fallback API error: ${response.status} ${response.statusText} – ${errorText}`);
+  }
+
+  const data = await response.json() as any;
+  const responseText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+  // Convert Gemini response to OpenAI-compatible format
+  return {
+    id: `gemini-${Date.now()}`,
+    created: Math.floor(Date.now() / 1000),
+    model: GEMINI_MODEL,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant" as Role,
+          content: responseText,
+        },
+        finish_reason: data?.candidates?.[0]?.finishReason ?? "stop",
+      },
+    ],
+    usage: {
+      prompt_tokens: data?.usageMetadata?.promptTokenCount ?? 0,
+      completion_tokens: data?.usageMetadata?.candidatesTokenCount ?? 0,
+      total_tokens: data?.usageMetadata?.totalTokenCount ?? 0,
+    },
+  };
+}
+
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
+  // If forge API key is not configured, go straight to Gemini fallback
+  if (!ENV.forgeApiKey) {
+    console.log("[LLM] No forge API key configured, using Gemini fallback");
+    return invokeGeminiFallback(params);
+  }
 
   const {
     messages,
@@ -329,6 +451,14 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   if (!response.ok) {
     const errorText = await response.text();
+    const statusCode = response.status;
+
+    // If IP is not allowed (403) or rate limited (429), fall back to Gemini
+    if ((statusCode === 403 || statusCode === 429) && ENV.geminiApiKey) {
+      console.log(`[LLM] Forge API returned ${statusCode}, falling back to Gemini API`);
+      return invokeGeminiFallback(params);
+    }
+
     throw new Error(
       `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
     );

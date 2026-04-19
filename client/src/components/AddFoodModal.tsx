@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Search, FileText, Barcode, Loader2, AlertCircle, Clock, Camera, Trash2, CheckCircle } from "lucide-react";
+import { Search, FileText, Barcode, Loader2, AlertCircle, Clock, Camera, Trash2, CheckCircle, Star } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { skipToken } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
@@ -27,7 +27,7 @@ interface AddFoodModalProps {
 }
 
 export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFoodModalProps) {
-  const [activeTab, setActiveTab] = useState<"search" | "manual" | "scan">("search");
+  const [activeTab, setActiveTab] = useState<"search" | "manual" | "scan" | "favorites">("search");
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -38,7 +38,7 @@ export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFood
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="search" className="flex items-center gap-2">
               <Search className="h-4 w-4" />
               <span className="hidden sm:inline">Search</span>
@@ -50,6 +50,10 @@ export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFood
             <TabsTrigger value="scan" className="flex items-center gap-2">
               <Camera className="h-4 w-4" />
               <span className="hidden sm:inline">AI Scan</span>
+            </TabsTrigger>
+            <TabsTrigger value="favorites" className="flex items-center gap-2">
+              <Star className="h-4 w-4" />
+              <span className="hidden sm:inline">Favorites</span>
             </TabsTrigger>
           </TabsList>
 
@@ -63,6 +67,10 @@ export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFood
 
           <TabsContent value="scan" className="space-y-4 mt-4">
             <GeminiScanTab onFoodAdded={onFoodAdded} onClose={onClose} mealType={mealType} />
+          </TabsContent>
+
+          <TabsContent value="favorites" className="space-y-4 mt-4">
+            <FavoritesTab onFoodAdded={onFoodAdded} onClose={onClose} />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -986,6 +994,95 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
           Log {includedItems.length} Item{includedItems.length !== 1 ? "s" : ""} to {mealType.charAt(0).toUpperCase() + mealType.slice(1)}
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ── FavoritesTab ──────────────────────────────────────────────────────────────
+
+interface FavoritesTabProps {
+  onFoodAdded: (food: any) => void;
+  onClose: () => void;
+}
+
+function FavoritesTab({ onFoodAdded, onClose }: FavoritesTabProps) {
+  const { data: favorites, isLoading, refetch } = trpc.food.getFavorites.useQuery();
+  const deleteFavoriteMutation = trpc.food.deleteFavorite.useMutation({
+    onSuccess: () => { refetch(); toast.success("Removed from favorites"); },
+  });
+
+  const handleAddFavorite = (food: any) => {
+    onFoodAdded({
+      foodName: food.foodName,
+      servingSize: food.servingSize || "1 serving",
+      calories: food.calories,
+      proteinGrams: food.proteinGrams,
+      carbsGrams: food.carbsGrams,
+      fatGrams: food.fatGrams,
+      sugarGrams: food.sugarGrams || 0,
+    });
+    onClose();
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10">
+        <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />
+      </div>
+    );
+  }
+
+  if (!favorites || favorites.length === 0) {
+    return (
+      <div className="text-center py-10">
+        <Star className="h-10 w-10 text-slate-600 mx-auto mb-3" />
+        <p className="text-slate-400 text-sm font-medium">No favorites yet</p>
+        <p className="text-slate-500 text-xs mt-1">Star foods in your food log to add them here for quick access.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+      {(favorites as any[]).map((food: any) => (
+        <div
+          key={food.id}
+          className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/60 hover:bg-slate-700/60 transition-colors group"
+        >
+          <button
+            className="flex-1 min-w-0 text-left"
+            onClick={() => handleAddFavorite(food)}
+          >
+            <div className="font-medium text-white text-sm truncate">{food.foodName}</div>
+            <div className="text-xs text-slate-400 mt-0.5">
+              {food.calories} cal &bull; {food.proteinGrams}g P &bull; {food.carbsGrams}g C &bull; {food.fatGrams}g F
+            </div>
+            {food.servingSize && food.servingSize !== "1 serving" && (
+              <div className="text-xs text-slate-500 mt-0.5">Per {food.servingSize}</div>
+            )}
+          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              size="sm"
+              onClick={() => handleAddFavorite(food)}
+              className="bg-cyan-600 hover:bg-cyan-700 text-white h-8 px-3 text-xs"
+            >
+              Add
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteFavoriteMutation.mutate({ favoriteFoodId: food.id });
+              }}
+              className="text-slate-500 hover:text-red-400 h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
