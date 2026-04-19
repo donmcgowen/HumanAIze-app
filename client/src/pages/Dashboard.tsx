@@ -1,19 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { Activity, Clock, Zap, RefreshCw, Brain, Loader2, Utensils } from "lucide-react";
+import { Zap, RefreshCw, Utensils } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
-import { WeightTracker } from "@/components/WeightTracker";
 import { StepCounter } from "@/components/StepCounter";
-
-type MealType = "breakfast" | "lunch" | "dinner" | "snack";
-
-const MEAL_SECTIONS: { value: MealType; label: string }[] = [
-  { value: "breakfast", label: "BREAKFAST" },
-  { value: "lunch", label: "LUNCH" },
-  { value: "dinner", label: "DINNER" },
-  { value: "snack", label: "SNACKS" },
-];
 
 const toPositiveNumberOrNull = (value: unknown): number | null => {
   if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
@@ -58,7 +48,6 @@ export default function Dashboard() {
     refetch: refetchDashboard,
   } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
-  const { data: cgmInsights } = trpc.cgm.getInsights.useQuery();
   const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
@@ -70,12 +59,6 @@ export default function Dashboard() {
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
   const { data: todayFoodLogs } = trpc.food.getDayLogs.useQuery({ startOfDay, endOfDay });
-
-  // Fetch today's manual glucose entries for AI insight
-  const { data: glucoseAIInsight, isLoading: glucoseInsightLoading } = trpc.manualGlucose.getAIInsight.useQuery(
-    { dayStart: startOfDay },
-    { staleTime: 5 * 60 * 1000 }
-  );
 
   useEffect(() => {
     if (syncData?.lastSyncTime) {
@@ -90,12 +73,6 @@ export default function Dashboard() {
   }, [syncData]);
 
   const chart = dashboard?.chart ?? [];
-  const sourcesByCategory = dashboard?.sourcesByCategory ?? {
-    glucose: [],
-    activity: [],
-    sleep: [],
-    nutrition: [],
-  };
 
   // Calculate macro totals from today's food logs
   const macroTotals = useMemo(() => {
@@ -118,25 +95,6 @@ export default function Dashboard() {
       { calories: 0, protein: 0, carbs: 0, fat: 0, sugar: 0 }
     );
   }, [todayFoodLogs]);
-
-  // Group food logs by meal type
-  const foodsByMeal = useMemo(() => {
-    if (!todayFoodLogs) return { breakfast: [], lunch: [], dinner: [], snack: [] };
-    const grouped: Record<MealType, any[]> = { breakfast: [], lunch: [], dinner: [], snack: [] };
-    (todayFoodLogs as any[]).forEach((log: any) => {
-      const mt = (log.mealType || "breakfast") as MealType;
-      if (grouped[mt]) grouped[mt].push(log);
-    });
-    return grouped;
-  }, [todayFoodLogs]);
-
-  const mealCalories = useMemo(() => {
-    const cal: Record<MealType, number> = { breakfast: 0, lunch: 0, dinner: 0, snack: 0 };
-    Object.entries(foodsByMeal).forEach(([mt, foods]) => {
-      cal[mt as MealType] = (foods as any[]).reduce((s: number, l: any) => s + (l.calories || 0), 0);
-    });
-    return cal;
-  }, [foodsByMeal]);
 
   // Macro targets from profile
   const profileMacroTargets = {
@@ -260,78 +218,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Meal Sections */}
-        <div className="space-y-2">
-          {MEAL_SECTIONS.map(({ value: meal, label }) => {
-            const foods = foodsByMeal[meal] || [];
-            const calories = mealCalories[meal];
-            return (
-              <div key={meal} className="rounded-xl bg-slate-800/60 border border-white/10 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                  <span className="font-bold text-cyan-400 tracking-widest text-sm">{label}</span>
-                  <span className="text-slate-400 text-sm font-medium">
-                    {calories > 0 ? `${Math.round(calories)} Cal` : "0 Cal"}
-                  </span>
-                </div>
-                {foods.length > 0 ? (
-                  <div className="divide-y divide-white/5">
-                    {foods.map((log: any) => (
-                      <div key={log.id} className="px-4 py-2">
-                        <div className="font-medium text-white text-sm">{log.foodName}</div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {log.calories} cal &bull; {log.proteinGrams}g P &bull; {log.carbsGrams}g C &bull; {log.fatGrams}g F
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="px-4 py-3 text-xs text-slate-600 italic">Nothing logged yet</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Gemini AI Glucose Insight */}
-        <div className="rounded-xl bg-slate-900/80 border border-purple-500/20 p-4">
-          <div className="flex items-center gap-2 mb-2">
-            <Brain className="w-4 h-4 text-purple-400" />
-            <span className="text-xs text-purple-300 uppercase tracking-wide font-semibold">AI Glucose Insight</span>
-          </div>
-          {glucoseInsightLoading ? (
-            <div className="flex items-center gap-2 text-slate-400 text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Analyzing today's glucose readings...</span>
-            </div>
-          ) : glucoseAIInsight ? (
-            <p className="text-sm text-slate-300 leading-relaxed">{glucoseAIInsight}</p>
-          ) : (
-            <p className="text-sm text-slate-500">Log manual glucose readings in Monitoring to get a personalized AI insight here.</p>
-          )}
-        </div>
-      </div>
-
-      {/* Weight Progress */}
-      <div className="space-y-3">
-        <h2 className="text-xl font-semibold text-white">Weight Progress</h2>
-        <WeightTracker />
-      </div>
-
-      {/* AI Dexcom/Clarity Insights */}
-      <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-        <p className="text-xs text-slate-400 uppercase tracking-wide mb-3">AI Dexcom/Clarity Insights</p>
-        {cgmInsights && cgmInsights.length > 0 ? (
-          <div className="space-y-2">
-            {cgmInsights.slice(0, 2).map((insight, idx) => (
-              <div key={`${insight.title}-${idx}`} className="rounded bg-slate-800 p-3">
-                <p className="text-sm font-semibold text-cyan-300">{insight.title}</p>
-                <p className="text-xs text-slate-300 mt-1">{insight.message}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-sm text-slate-400">Import Dexcom Clarity CSV/PDF to generate AI glucose insights here.</p>
-        )}
       </div>
 
       {/* Steps */}
@@ -366,108 +252,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Connected Sources */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            <Zap className="w-4 h-4" />
-            Glucose Sources
-          </h3>
-          <div className="space-y-2">
-            {sourcesByCategory.glucose.length > 0 ? (
-              sourcesByCategory.glucose.map((source) => (
-                <div key={source.id} className="text-sm text-slate-300">
-                  {source.displayName}
-                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
-                    source.status === "connected"
-                      ? "bg-green-900 text-green-200"
-                      : "bg-slate-800 text-slate-400"
-                  }`}>
-                    {source.status}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-slate-500">No sources connected</div>
-            )}
-          </div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            <Activity className="w-4 h-4" />
-            Activity Sources
-          </h3>
-          <div className="space-y-2">
-            {sourcesByCategory.activity.length > 0 ? (
-              sourcesByCategory.activity.map((source) => (
-                <div key={source.id} className="text-sm text-slate-300">
-                  {source.displayName}
-                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
-                    source.status === "connected"
-                      ? "bg-green-900 text-green-200"
-                      : "bg-slate-800 text-slate-400"
-                  }`}>
-                    {source.status}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-slate-500">No sources connected</div>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            <Clock className="w-4 h-4" />
-            Sleep Sources
-          </h3>
-          <div className="space-y-2">
-            {sourcesByCategory.sleep.length > 0 ? (
-              sourcesByCategory.sleep.map((source) => (
-                <div key={source.id} className="text-sm text-slate-300">
-                  {source.displayName}
-                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
-                    source.status === "connected"
-                      ? "bg-green-900 text-green-200"
-                      : "bg-slate-800 text-slate-400"
-                  }`}>
-                    {source.status}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-slate-500">No sources connected</div>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
-          <h3 className="font-semibold mb-3 flex items-center gap-2">
-            <Zap className="w-4 h-4" />
-            Nutrition Sources
-          </h3>
-          <div className="space-y-2">
-            {sourcesByCategory.nutrition.length > 0 ? (
-              sourcesByCategory.nutrition.map((source) => (
-                <div key={source.id} className="text-sm text-slate-300">
-                  {source.displayName}
-                  <span className={`ml-2 text-xs px-2 py-1 rounded ${
-                    source.status === "connected"
-                      ? "bg-green-900 text-green-200"
-                      : "bg-slate-800 text-slate-400"
-                  }`}>
-                    {source.status}
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-sm text-slate-500">No sources connected</div>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
