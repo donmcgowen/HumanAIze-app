@@ -77,22 +77,6 @@ export function Progress() {
     fat: "#eab308",
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-slate-400">Loading progress data...</div>
-      </div>
-    );
-  }
-
-  if (!trends) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-slate-400">No data available. Start logging food to see your progress!</div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6">
       <div className="max-w-7xl mx-auto">
@@ -125,6 +109,9 @@ export function Progress() {
           <GoalTracker />
         </div>
 
+        {/* Macro Trends Section - only shown when data is available */}
+        {trends && (
+        <div>
         {/* Controls */}
         <div className="flex flex-wrap gap-4 mb-8">
           <Select value={dateRange} onValueChange={(value) => setDateRange(value as any)}>
@@ -372,6 +359,8 @@ export function Progress() {
             )}
           </CardContent>
         </Card>
+        </div>
+        )}
       </div>
     </div>
   );
