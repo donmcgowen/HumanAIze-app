@@ -93,10 +93,10 @@ async function callVisionLLM(
   const result = await invokeLLM({
     messages: [
       {
-        role: "user",
+        role: "user" as const,
         content: [
-          { type: "text", text: prompt },
-          { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+          { type: "text" as const, text: prompt },
+          { type: "image_url" as const, image_url: { url: dataUrl, detail: "high" as const } },
         ],
       },
     ],
