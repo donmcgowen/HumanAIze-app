@@ -4,8 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Calendar, TrendingUp, Target, Zap } from "lucide-react";
+import { Calendar, TrendingUp, Target, Zap, Weight, Ruler } from "lucide-react";
 import { GoalTracker } from "@/components/GoalTracker";
+import { WeightTracker } from "@/components/WeightTracker";
+import { BodyMeasurementSection } from "@/components/BodyMeasurementSection";
 
 type ViewType = "weekly" | "monthly";
 
@@ -98,6 +100,24 @@ export function Progress() {
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">Progress Tracking</h1>
           <p className="text-slate-400">Monitor your macro trends and consistency over time</p>
+        </div>
+
+        {/* Weight Tracking Section */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold text-white mb-4 flex items-center gap-2">
+            <Weight className="w-6 h-6 text-blue-400" />
+            Weight Tracking
+          </h2>
+          <WeightTracker />
+        </div>
+
+        {/* Body Measurements Section */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold text-white mb-4 flex items-center gap-2">
+            <Ruler className="w-6 h-6 text-cyan-400" />
+            Body Measurements
+          </h2>
+          <BodyMeasurementSection />
         </div>
 
         {/* Goal Tracker Section */}

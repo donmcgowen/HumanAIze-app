@@ -1539,6 +1539,42 @@ Return a JSON object with an "insights" array of exactly 3 items. Each item has:
     deleteEntry: protectedProcedure
       .input(z.object({ entryId: z.number().int() }))
       .mutation(({ ctx, input }) => deleteManualGlucoseEntry(input.entryId, ctx.user.id)),
+    getAIInsight: protectedProcedure
+      .input(z.object({ dayStart: z.number().int() }))
+      .query(async ({ ctx, input }) => {
+        const entries = await getTodayManualGlucoseEntries(ctx.user.id, input.dayStart);
+        if (!entries || entries.length === 0) return null;
+
+        const { invokeLLM } = await import("./_core/llm");
+
+        const readingsSummary = entries
+          .map((e: any) => {
+            const time = new Date(e.readingAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+            return `${time}: ${e.mgdl} mg/dL${e.notes ? ` (${e.notes})` : ""}`;
+          })
+          .join(", ");
+
+        const avgGlucose = Math.round(entries.reduce((s: number, e: any) => s + e.mgdl, 0) / entries.length);
+
+        const prompt = `You are a diabetes health coach. A user has logged the following manual glucose readings today:
+${readingsSummary}
+Average today: ${avgGlucose} mg/dL
+
+Provide one short, practical, encouraging insight (2-3 sentences) about their glucose pattern today. Focus on what the readings suggest and one actionable tip. Be concise and supportive.`;
+
+        try {
+          const response = await invokeLLM({
+            messages: [
+              { role: "system", content: "You are a supportive diabetes health coach. Be brief and practical." },
+              { role: "user", content: prompt },
+            ],
+          });
+          const content = response.choices[0].message.content;
+          return typeof content === "string" ? content.trim() : null;
+        } catch {
+          return null;
+        }
+      }),
   }),
 });
 

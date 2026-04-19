@@ -199,8 +199,8 @@ export function CGMSection() {
         </Card>
       ) : stats ? (
         <>
-          {/* Three Metric Boxes */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Single Metric Box: Avg Glucose only (A1C and TIR shown on Monitoring page) */}
+          <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
             <Card className="border border-white/10 bg-gradient-to-br from-cyan-950/50 to-slate-950">
               <CardContent className="pt-6 pb-4">
                 <p className="text-slate-400 text-sm mb-1">Avg Glucose (30d)</p>
@@ -208,33 +208,6 @@ export function CGMSection() {
                 <p className="text-slate-500 text-xs mt-1">mg/dL</p>
                 <div className="mt-3 text-xs text-slate-400">
                   Range: {stats.min} – {stats.max} mg/dL
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border border-white/10 bg-gradient-to-br from-orange-950/40 to-slate-950">
-              <CardContent className="pt-6 pb-4">
-                <p className="text-slate-400 text-sm mb-1">A1C Estimate</p>
-                <p className={`text-3xl font-bold ${stats.a1cEstimate <= 5.7 ? "text-green-400" : stats.a1cEstimate <= 6.4 ? "text-yellow-400" : "text-red-400"}`}>
-                  {stats.a1cEstimate.toFixed(1)}
-                </p>
-                <p className="text-slate-500 text-xs mt-1">estimated from avg glucose</p>
-                <div className="mt-3 text-xs text-slate-400">
-                  {stats.a1cEstimate <= 5.7 ? "Normal" : stats.a1cEstimate <= 6.4 ? "Pre-diabetic range" : "Diabetic range"}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="border border-white/10 bg-gradient-to-br from-green-950/40 to-slate-950">
-              <CardContent className="pt-6 pb-4">
-                <p className="text-slate-400 text-sm mb-1">Time in Range</p>
-                <p className={`text-3xl font-bold ${stats.timeInRange >= 70 ? "text-green-400" : stats.timeInRange >= 50 ? "text-yellow-400" : "text-red-400"}`}>
-                  {stats.timeInRange}%
-                </p>
-                <p className="text-slate-500 text-xs mt-1">70–180 mg/dL</p>
-                <div className="mt-3 flex gap-3 text-xs">
-                  <span className="text-yellow-400">↑ {stats.timeAboveRange}% high</span>
-                  <span className="text-red-400">↓ {stats.timeBelowRange}% low</span>
                 </div>
               </CardContent>
             </Card>
