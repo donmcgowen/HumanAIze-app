@@ -23,7 +23,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource } from "./db";
 import { searchUSDAFoods, searchUSDABrandedFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant, getDefaultUnit } from "./barcode";
@@ -604,7 +604,7 @@ IMPORTANT: Be specific to their age, health conditions, and goals. Do NOT sugges
           if (!geminiKey) throw new Error("Gemini API key not configured");
 
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -665,7 +665,7 @@ ${input.context ? `Current page: ${input.context}` : ""}
 Be concise, friendly, and actionable. Format responses with bullet points or short paragraphs. Always personalize advice based on the user's profile data when available.`;
 
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -713,7 +713,12 @@ Be concise, friendly, and actionable. Format responses with bullet points or sho
           notes: z.string().optional(),
         })
       )
-      .mutation(({ ctx, input }) => addFoodLog(ctx.user.id, input)),
+      .mutation(async ({ ctx, input }) => {
+        const result = await addFoodLog(ctx.user.id, input);
+        // Auto-add to favorites if logged 5+ times
+        autoAddToFavorites(ctx.user.id, input.foodName).catch(() => {});
+        return result;
+      }),
     getDayLogs: protectedProcedure
       .input(
         z.object({
@@ -1126,7 +1131,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
             console.warn("[AI Meal Suggestions] No AI API keys configured");
             return [];
           }
-          const GEMINI_MODEL = "gemini-2.0-flash";
+          const GEMINI_MODEL = "gemini-2.5-flash";
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ENV.geminiApiKey}`;
           const geminiRes = await fetch(geminiUrl, {
             method: "POST",
@@ -1424,31 +1429,16 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
       .query(async ({ ctx, input }) => {
         const query = input.query.trim().toLowerCase();
         if (!query) return [];
-        // Fetch up to 365 days of food logs and search by name
-        const allLogs = await getRecentFoodLogsForInsights(ctx.user.id, 365);
-        // Filter by query words, deduplicate by food name (keep most recent)
-        const queryWords = query.split(/\s+/).filter(w => w.length > 1);
-        const matched = allLogs.filter((log: any) => {
-          const name = (log.foodName || "").toLowerCase();
-          return queryWords.some(w => name.includes(w));
-        });
-        // Deduplicate by food name (keep most recent)
-        const seen = new Set<string>();
-        const deduped: typeof matched = [];
-        for (const log of matched) {
-          const key = (log.foodName || "").toLowerCase().trim();
-          if (!seen.has(key)) {
-            seen.add(key);
-            deduped.push(log);
-          }
-        }
-        return deduped.slice(0, 8).map((log: any) => ({
-          foodName: log.foodName,
-          calories: log.calories,
-          proteinGrams: log.proteinGrams,
-          carbsGrams: log.carbsGrams,
-          fatGrams: log.fatGrams,
-          servingSize: log.servingSize,
+        // Use getFrequentFoods for frequency-ranked results (most logged foods first)
+        const frequentFoods = await getFrequentFoods(ctx.user.id, query, 8);
+        return frequentFoods.map((f: any) => ({
+          foodName: f.foodName,
+          calories: f.calories,
+          proteinGrams: f.proteinGrams,
+          carbsGrams: f.carbsGrams,
+          fatGrams: f.fatGrams,
+          servingSize: f.servingSize,
+          logCount: f.logCount,
         }));
       }),
   }),

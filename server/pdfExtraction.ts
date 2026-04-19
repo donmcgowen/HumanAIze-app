@@ -28,7 +28,7 @@ export interface ExtractedClarityData {
   aiInsights?: string[];
 }
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 /**
  * Main entry point: parse a Dexcom Clarity PDF buffer using Gemini File API.

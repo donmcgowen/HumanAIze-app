@@ -47,15 +47,37 @@ function mapFoodItem(food: any): USDAFoodResult {
   // For branded foods, USDA returns macros per serving (not per 100g).
   // We need to normalize to per-100g so the serving-size calculator works correctly.
   // The serving size in grams is stored in food.servingSize (when unit is g or ml).
+  //
+  // IMPORTANT: Some USDA entries have a mismatch between servingSize and householdServingFullText.
+  // Example: Muscle Milk Pro has servingSize=53g but householdServingFullText="2 SCOOPS"
+  // and the macros are stored per 2 scoops (82g total), not per 1 scoop (53g).
+  // We detect this by checking if householdServingFullText starts with a number > 1.
   let servingWeightG = 100; // default: already per 100g
   const servingUnit = (food.servingSizeUnit || "g").toLowerCase();
   if (food.servingSize && food.dataType === "Branded") {
     const sz = parseFloat(food.servingSize);
     if (!isNaN(sz) && sz > 0) {
+      let weightG = 0;
       if (servingUnit === "g" || servingUnit === "ml") {
-        servingWeightG = sz;
+        weightG = sz;
       } else if (servingUnit === "oz") {
-        servingWeightG = sz * 28.35;
+        weightG = sz * 28.35;
+      } else if (servingUnit === "grm" || servingUnit === "gram" || servingUnit === "grams") {
+        weightG = sz;
+      }
+      if (weightG > 0) {
+        // Check if householdServingFullText indicates a multiplier
+        // e.g., "2 SCOOPS", "3 TBSP", "2 CUPS" — means macros are per N × servingSize
+        const householdText = (food.householdServingFullText || "").trim();
+        const multiplierMatch = householdText.match(/^(\d+(?:\.\d+)?)\s+/i);
+        const multiplier = multiplierMatch ? parseFloat(multiplierMatch[1]) : 1;
+        if (multiplier > 1 && multiplier <= 10) {
+          // Macros are per (multiplier × weightG) grams total
+          servingWeightG = weightG * multiplier;
+          console.log(`[USDA] Household multiplier detected: "${householdText}" → ${multiplier}x ${weightG}g = ${servingWeightG}g actual serving`);
+        } else {
+          servingWeightG = weightG;
+        }
       }
     }
   }
@@ -73,12 +95,14 @@ function mapFoodItem(food: any): USDAFoodResult {
     console.warn(`[USDA] Anomalous nutrition data for "${food.description}": ${calories}cal, ${proteinGrams}g protein, ${carbsGrams}g carbs, ${fatGrams}g fat (servingWeightG=${servingWeightG})`);
   }
 
-  // Build serving size string
-  let servingSize = "100g";
-  if (food.servingSize && food.servingSizeUnit) {
+  // Build serving size string — use actual serving weight (accounting for multiplier)
+  // e.g., Muscle Milk Pro: servingSize=53g, householdText="2 SCOOPS" → "82g (2 scoops)"
+  let servingSize = `${Math.round(servingWeightG)}g`;
+  const householdText = (food.householdServingFullText || "").trim();
+  if (householdText) {
+    servingSize = `${Math.round(servingWeightG)}g (${householdText.toLowerCase()})`;
+  } else if (food.servingSize && food.servingSizeUnit && servingWeightG === parseFloat(food.servingSize)) {
     servingSize = `${food.servingSize}${food.servingSizeUnit}`;
-  } else if (food.householdServingFullText) {
-    servingSize = food.householdServingFullText;
   }
 
   return {
@@ -94,6 +118,7 @@ function mapFoodItem(food: any): USDAFoodResult {
     servingSize,
     servingUnit: food.servingSizeUnit || "g",
     brand: food.brandOwner || food.brandName || undefined,
+    householdServingText: householdText || undefined,
   };
 }
 

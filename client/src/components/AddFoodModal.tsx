@@ -400,14 +400,15 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
         </div>
       )}
 
-      {/* Previously logged foods matching the search query */}
+      {/* Previously logged foods matching the search query — sorted by frequency */}
       {historyMatches && historyMatches.length > 0 && !selectedFood && debouncedQuery.trim().length > 2 && (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-medium">
             <Clock className="h-3.5 w-3.5" />
-            <span>Previously Logged</span>
+            <span>Your Foods</span>
+            <span className="text-gray-500">— tap to add instantly</span>
           </div>
-          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
             {historyMatches.map((log: any, idx: number) => (
               <Card
                 key={`hist-${idx}`}
@@ -417,16 +418,21 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <Clock className="h-3 w-3 text-cyan-400 flex-shrink-0" />
-                    <p className="font-medium text-sm truncate">{log.foodName}</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{log.foodName}</p>
+                      {log.logCount && (
+                        <p className="text-xs text-gray-500">
+                          {log.logCount >= 5 ? "⭐ " : ""}
+                          Logged {log.logCount}x{log.servingSize && log.servingSize !== "custom" ? ` · ${log.servingSize}` : ""}
+                        </p>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right text-xs ml-2 flex-shrink-0">
                     <p className="font-semibold text-cyan-400">{Math.round(log.calories)} cal</p>
                     <p className="text-gray-400">{log.proteinGrams}g P</p>
                   </div>
                 </div>
-                {log.servingSize && log.servingSize !== "custom" && (
-                  <p className="text-xs text-gray-500 ml-5 mt-0.5">{log.servingSize}</p>
-                )}
               </Card>
             ))}
           </div>
@@ -916,7 +922,16 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
       );
       setPhase("results");
     } catch (err: any) {
-      setError(err?.message ?? "Failed to analyze. Please try again.");
+      const rawMsg: string = err?.message ?? "";
+      let friendlyMsg = "Failed to analyze. Please try again.";
+      if (rawMsg.includes("RESOURCE_EXHAUSTED") || rawMsg.includes("quota") || rawMsg.includes("Quota")) {
+        friendlyMsg = "AI scanning is temporarily unavailable (rate limit reached). Please try again in a minute, or use the search tab to find your food.";
+      } else if (rawMsg.includes("INVALID_ARGUMENT") || rawMsg.includes("image")) {
+        friendlyMsg = "Could not read the image. Try taking a clearer photo of the nutrition label or food.";
+      } else if (rawMsg.includes("network") || rawMsg.includes("fetch")) {
+        friendlyMsg = "Network error. Check your connection and try again.";
+      }
+      setError(friendlyMsg);
       setPhase("capture");
     }
   }, [analyzeMutation]);
@@ -965,7 +980,16 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
       );
       setPhase("results");
     } catch (err: any) {
-      setError(err?.message ?? "Failed to analyze. Please try again.");
+      const rawMsg: string = err?.message ?? "";
+      let friendlyMsg = "Failed to analyze. Please try again.";
+      if (rawMsg.includes("RESOURCE_EXHAUSTED") || rawMsg.includes("quota") || rawMsg.includes("Quota")) {
+        friendlyMsg = "AI scanning is temporarily unavailable (rate limit reached). Please try again in a minute, or use the search tab to find your food.";
+      } else if (rawMsg.includes("INVALID_ARGUMENT") || rawMsg.includes("image")) {
+        friendlyMsg = "Could not read the image. Try taking a clearer photo of the nutrition label or food.";
+      } else if (rawMsg.includes("network") || rawMsg.includes("fetch")) {
+        friendlyMsg = "Network error. Check your connection and try again.";
+      }
+      setError(friendlyMsg);
       setPhase("capture");
     }
   }, [analyzeMutation]);

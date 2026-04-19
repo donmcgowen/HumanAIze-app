@@ -733,6 +733,130 @@ export async function getRecentFoods(userId: number, limit: number = 5): Promise
     .limit(limit);
 }
 
+/**
+ * Get frequently logged foods for a user, optionally filtered by a search query.
+ * Returns foods grouped by name with log count, ordered by most frequently logged.
+ * Foods logged 5+ times are automatically added to favorites.
+ */
+export async function getFrequentFoods(
+  userId: number,
+  query?: string,
+  limit: number = 10
+): Promise<Array<{
+  foodName: string;
+  servingSize: string;
+  calories: number;
+  proteinGrams: number;
+  carbsGrams: number;
+  fatGrams: number;
+  logCount: number;
+  lastLoggedAt: number;
+}>> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot get frequent foods: database not available");
+    return [];
+  }
+
+  // Build where clause
+  const conditions = [eq(foodLogs.userId, userId)];
+  if (query && query.trim().length > 0) {
+    conditions.push(sql`LOWER(${foodLogs.foodName}) LIKE LOWER(${`%${query.trim()}%`})`);
+  }
+
+  // Group by foodName, count occurrences, get most recent macros
+  const results = await db
+    .select({
+      foodName: foodLogs.foodName,
+      servingSize: foodLogs.servingSize,
+      calories: foodLogs.calories,
+      proteinGrams: foodLogs.proteinGrams,
+      carbsGrams: foodLogs.carbsGrams,
+      fatGrams: foodLogs.fatGrams,
+      logCount: sql<number>`COUNT(*)`.as("logCount"),
+      lastLoggedAt: sql<number>`MAX(${foodLogs.loggedAt})`.as("lastLoggedAt"),
+    })
+    .from(foodLogs)
+    .where(and(...conditions))
+    .groupBy(foodLogs.foodName)
+    .orderBy(desc(sql`COUNT(*)`), desc(sql`MAX(${foodLogs.loggedAt})`))
+    .limit(limit);
+
+  return results.map(r => ({
+    foodName: r.foodName,
+    servingSize: r.servingSize || "1 serving",
+    calories: r.calories,
+    proteinGrams: r.proteinGrams,
+    carbsGrams: r.carbsGrams,
+    fatGrams: r.fatGrams,
+    logCount: Number(r.logCount),
+    lastLoggedAt: Number(r.lastLoggedAt),
+  }));
+}
+
+/**
+ * Auto-add a food to favorites if it has been logged 5+ times and isn't already a favorite.
+ */
+export async function autoAddToFavorites(userId: number, foodName: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+
+  try {
+    // Count how many times this food has been logged
+    const countResult = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(foodLogs)
+      .where(and(
+        eq(foodLogs.userId, userId),
+        sql`LOWER(${foodLogs.foodName}) = LOWER(${foodName})`
+      ));
+
+    const logCount = Number(countResult[0]?.count || 0);
+    if (logCount < 5) return; // Not enough logs yet
+
+    // Check if already a favorite
+    const existing = await db
+      .select({ id: favoriteFoods.id })
+      .from(favoriteFoods)
+      .where(and(
+        eq(favoriteFoods.userId, userId),
+        sql`LOWER(${favoriteFoods.foodName}) = LOWER(${foodName})`
+      ))
+      .limit(1);
+
+    if (existing.length > 0) return; // Already a favorite
+
+    // Get the most recent log entry for this food to use its macros
+    const recentLog = await db
+      .select()
+      .from(foodLogs)
+      .where(and(
+        eq(foodLogs.userId, userId),
+        sql`LOWER(${foodLogs.foodName}) = LOWER(${foodName})`
+      ))
+      .orderBy(desc(foodLogs.loggedAt))
+      .limit(1);
+
+    if (recentLog.length === 0) return;
+
+    const log = recentLog[0];
+    await db.insert(favoriteFoods).values({
+      userId,
+      foodName: log.foodName,
+      servingSize: log.servingSize || "1 serving",
+      calories: log.calories,
+      proteinGrams: log.proteinGrams,
+      carbsGrams: log.carbsGrams,
+      fatGrams: log.fatGrams,
+      source: "manual",
+    });
+
+    console.log(`[AutoFavorite] Added "${foodName}" to favorites for user ${userId} (logged ${logCount} times)`);
+  } catch (error) {
+    console.warn("[AutoFavorite] Error auto-adding to favorites:", error);
+  }
+}
+
 export async function deleteFoodLog(foodLogId: number, userId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) {
