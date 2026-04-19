@@ -1050,13 +1050,14 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
   const handleAddBarcodeProduct = () => {
     if (!barcodeProduct) return;
     const p = barcodeProduct;
+    // Server returns protein/carbs/fat (not proteinGrams/carbsGrams/fatGrams)
     onFoodAdded({
       foodName: p.name,
       servingSize: `${p.servingSize ?? 1} ${p.servingUnit ?? p.defaultUnit ?? "serving"}`,
       calories: Number(p.calories) || 0,
-      proteinGrams: Number(p.proteinGrams) || 0,
-      carbsGrams: Number(p.carbsGrams) || 0,
-      fatGrams: Number(p.fatGrams) || 0,
+      proteinGrams: Number(p.protein ?? p.proteinGrams) || 0,
+      carbsGrams: Number(p.carbs ?? p.carbsGrams) || 0,
+      fatGrams: Number(p.fat ?? p.fatGrams) || 0,
     });
     toast.success(`Added ${p.name} to ${mealType}`);
     onClose();
@@ -1090,9 +1091,9 @@ function GeminiScanTab({ onFoodAdded, onClose, mealType }: GeminiScanTabProps) {
             <div className="grid grid-cols-4 gap-2">
               {[
                 { label: "Calories", value: p.calories, color: "text-white", unit: "" },
-                { label: "Protein", value: p.proteinGrams, color: "text-cyan-400", unit: "g" },
-                { label: "Carbs", value: p.carbsGrams, color: "text-yellow-400", unit: "g" },
-                { label: "Fat", value: p.fatGrams, color: "text-orange-400", unit: "g" },
+                { label: "Protein", value: p.protein ?? p.proteinGrams, color: "text-cyan-400", unit: "g" },
+                { label: "Carbs", value: p.carbs ?? p.carbsGrams, color: "text-yellow-400", unit: "g" },
+                { label: "Fat", value: p.fat ?? p.fatGrams, color: "text-orange-400", unit: "g" },
               ].map(m => (
                 <div key={m.label} className="bg-gray-900 rounded-lg p-2 text-center">
                   <p className="text-gray-500 text-[10px] mb-0.5">{m.label}</p>
