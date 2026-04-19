@@ -812,6 +812,125 @@ export const appRouter = router({
           input.limit
         );
       }),
+    getAIMealSuggestions: protectedProcedure
+      .input(
+        z.object({
+          startOfDay: z.number(),
+          endOfDay: z.number(),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const userId = ctx.user.id;
+
+        // Gather all backend data in parallel
+        const [profile, foodLogs, weightProgress, cgmStats, glucoseEntries] = await Promise.allSettled([
+          getUserProfile(userId),
+          getFoodLogsForDay(userId, input.startOfDay, input.endOfDay),
+          getWeightProgressData(userId, 90),
+          getCGMStats(userId, 30),
+          getTodayManualGlucoseEntries(userId, input.startOfDay),
+        ]);
+
+        const prof = profile.status === "fulfilled" ? profile.value : null;
+        const logs = foodLogs.status === "fulfilled" ? foodLogs.value : [];
+        const weight = weightProgress.status === "fulfilled" ? weightProgress.value : null;
+        const cgm = cgmStats.status === "fulfilled" ? cgmStats.value : null;
+        const glucose = glucoseEntries.status === "fulfilled" ? glucoseEntries.value : [];
+
+        // Compute consumed macros so far today
+        const consumed = (logs as any[]).reduce(
+          (acc: any, log: any) => ({
+            calories: acc.calories + (log.calories || 0),
+            protein: acc.protein + (log.proteinGrams || 0),
+            carbs: acc.carbs + (log.carbsGrams || 0),
+            fat: acc.fat + (log.fatGrams || 0),
+          }),
+          { calories: 0, protein: 0, carbs: 0, fat: 0 }
+        );
+
+        const targets = {
+          calories: (prof as any)?.dailyCalorieTarget || 2000,
+          protein: (prof as any)?.dailyProteinTarget || 150,
+          carbs: (prof as any)?.dailyCarbsTarget || 200,
+          fat: (prof as any)?.dailyFatTarget || 65,
+        };
+
+        const remaining = {
+          calories: Math.max(0, targets.calories - consumed.calories),
+          protein: Math.max(0, targets.protein - consumed.protein),
+          carbs: Math.max(0, targets.carbs - consumed.carbs),
+          fat: Math.max(0, targets.fat - consumed.fat),
+        };
+
+        // Build a rich context string for Gemini
+        const mealSummary = (logs as any[]).length > 0
+          ? (logs as any[]).map((l: any) => `${l.foodName} (${l.mealType}): ${l.calories}cal, ${l.proteinGrams}g P, ${l.carbsGrams}g C, ${l.fatGrams}g F`).join("; ")
+          : "Nothing logged yet today";
+
+        const weightSummary = weight && (weight as any).entries?.length > 0
+          ? `Current weight: ${(weight as any).currentWeight} lbs, starting: ${(weight as any).startingWeight} lbs, change: ${(weight as any).weightChange} lbs`
+          : "No weight data available";
+
+        const glucoseSummary = (glucose as any[]).length > 0
+          ? `Today's glucose readings: ${(glucose as any[]).map((g: any) => `${g.glucoseMgDl} mg/dL at ${new Date(g.readingTime).toLocaleTimeString()}`).join(", ")}`
+          : cgm && (cgm as any).avgGlucose
+          ? `30-day avg glucose: ${(cgm as any).avgGlucose} mg/dL, A1C estimate: ${(cgm as any).a1cEstimate}%`
+          : "No glucose data available";
+
+        const goalSummary = prof
+          ? `Goal: ${(prof as any).primaryGoal || "general health"}, height: ${(prof as any).heightFeet}ft ${(prof as any).heightInches}in, age: ${(prof as any).age || "unknown"}`
+          : "No profile data";
+
+        const prompt = `You are a personalized nutrition AI. Based on this user's data, suggest 3 specific meals they should eat for the rest of today to hit their macro targets.
+
+User profile: ${goalSummary}
+Weight: ${weightSummary}
+Glucose: ${glucoseSummary}
+
+Today's macro targets: ${targets.calories} cal, ${targets.protein}g protein, ${targets.carbs}g carbs, ${targets.fat}g fat
+Already consumed: ${Math.round(consumed.calories)} cal, ${Math.round(consumed.protein)}g protein, ${Math.round(consumed.carbs)}g carbs, ${Math.round(consumed.fat)}g fat
+Remaining: ${Math.round(remaining.calories)} cal, ${Math.round(remaining.protein)}g protein, ${Math.round(remaining.carbs)}g carbs, ${Math.round(remaining.fat)}g fat
+
+Foods logged today: ${mealSummary}
+
+Respond with a JSON array of exactly 3 meal suggestions. Each suggestion must have:
+- name: string (specific meal name, e.g. "Grilled Chicken with Brown Rice")
+- description: string (1-2 sentences why this fits their goals)
+- calories: number
+- protein: number (grams)
+- carbs: number (grams)
+- fat: number (grams)
+- mealType: "breakfast" | "lunch" | "dinner" | "snack"
+
+Focus on meals that fill the remaining macro gaps. If glucose is high, suggest lower-carb options. If protein is low, prioritize high-protein meals. Be specific with real food names.`;
+
+        try {
+          const { invokeLLM } = await import("./_core/llm");
+          const result = await invokeLLM({
+            messages: [{ role: "user", content: prompt }],
+            model: "gemini-2.5-flash",
+            response_format: { type: "json_object" },
+          });
+
+          const text = result.content || "";
+          // Extract JSON array from response
+          const match = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+          if (match) {
+            const suggestions = JSON.parse(match[0]);
+            return Array.isArray(suggestions) ? suggestions.slice(0, 3) : [];
+          }
+          // Try parsing entire response as JSON
+          try {
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed)) return parsed.slice(0, 3);
+            if (parsed.suggestions) return parsed.suggestions.slice(0, 3);
+          } catch {}
+          return [];
+        } catch (error) {
+          console.error("[AI Meal Suggestions] Error:", error);
+          return [];
+        }
+      }),
     searchWithAI: publicProcedure
       .input(z.object({ query: z.string().min(1) }))
       .query(async ({ input }) => {

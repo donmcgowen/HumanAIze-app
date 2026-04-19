@@ -1,7 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, Check, X, Loader2, Star, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, Loader2, Star, ChevronLeft, ChevronRight, Calendar, Sparkles, RefreshCw } from "lucide-react";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { AddFoodModal } from "./AddFoodModal";
@@ -98,6 +98,7 @@ export function FoodLogger() {
 
   // ── Other state ──
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [showAISuggestions, setShowAISuggestions] = useState(false);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
   const [showAddFoodModal, setShowAddFoodModal] = useState(false);
   const [activeMealType, setActiveMealType] = useState<MealType>("breakfast");
@@ -114,6 +115,16 @@ export function FoodLogger() {
   });
 
   const { data: favorites, refetch: refetchFavorites } = trpc.food.getFavorites.useQuery();
+
+  // ── AI Meal Suggestions ──
+  const {
+    data: aiSuggestions,
+    isLoading: aiLoading,
+    refetch: refetchAI,
+  } = trpc.food.getAIMealSuggestions.useQuery(
+    { startOfDay: dayStart, endOfDay: dayEnd },
+    { enabled: showAISuggestions, staleTime: 5 * 60 * 1000 }
+  );
 
   const toPositiveNumberOrNull = (value: unknown): number | null => {
     if (typeof value === "number") return Number.isFinite(value) && value > 0 ? value : null;
@@ -364,6 +375,78 @@ export function FoodLogger() {
                 }}
               />
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── AI Meal Suggestions ── */}
+      <div className="rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-white/10 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-purple-400" />
+            <span className="font-bold text-purple-300 tracking-widest text-sm">AI MEAL SUGGESTIONS</span>
+          </div>
+          <button
+            onClick={() => {
+              if (!showAISuggestions) {
+                setShowAISuggestions(true);
+              } else {
+                refetchAI();
+              }
+            }}
+            disabled={aiLoading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 hover:text-purple-200 text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            {aiLoading ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking...</>
+            ) : showAISuggestions && aiSuggestions ? (
+              <><RefreshCw className="h-3.5 w-3.5" /> Refresh</>
+            ) : (
+              <><Sparkles className="h-3.5 w-3.5" /> Get Suggestions</>
+            )}
+          </button>
+        </div>
+
+        {!showAISuggestions && (
+          <div className="px-4 py-5 text-center">
+            <p className="text-slate-400 text-sm">Get personalized meal suggestions based on your remaining macros, glucose levels, weight progress, and health goals.</p>
+          </div>
+        )}
+
+        {showAISuggestions && aiLoading && (
+          <div className="px-4 py-8 flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-purple-400" />
+            <p className="text-slate-400 text-sm">Analyzing your nutrition data and goals...</p>
+          </div>
+        )}
+
+        {showAISuggestions && !aiLoading && aiSuggestions && aiSuggestions.length === 0 && (
+          <div className="px-4 py-5 text-center">
+            <p className="text-slate-400 text-sm">No suggestions available. Try logging some foods first or check your profile targets.</p>
+          </div>
+        )}
+
+        {showAISuggestions && !aiLoading && aiSuggestions && aiSuggestions.length > 0 && (
+          <div className="divide-y divide-white/5">
+            {(aiSuggestions as any[]).map((s: any, i: number) => (
+              <div key={i} className="px-4 py-4">
+                <div className="flex items-start justify-between gap-3 mb-1.5">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-white text-sm">{s.name}</div>
+                    <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{s.description}</p>
+                  </div>
+                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-purple-600/30 text-purple-300 border border-purple-500/30">
+                    {s.mealType}
+                  </span>
+                </div>
+                <div className="flex gap-3 mt-2">
+                  <span className="text-xs text-green-400 font-medium">{Math.round(s.calories)} cal</span>
+                  <span className="text-xs text-orange-400">{Math.round(s.protein)}g P</span>
+                  <span className="text-xs text-slate-400">{Math.round(s.carbs)}g C</span>
+                  <span className="text-xs text-slate-400">{Math.round(s.fat)}g F</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
