@@ -1557,6 +1557,67 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           ];
         }
       }),
+    getDetailedPlan: protectedProcedure
+      .input(
+        z.object({
+          title: z.string().min(1),
+          exerciseType: z.string().min(1),
+          durationMinutes: z.number().int().positive(),
+          intensity: z.enum(["light", "moderate", "intense"]),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const profile = await getUserProfile(ctx.user.id);
+        const fitnessGoal = profile?.fitnessGoal || "maintain";
+        const weightLbs = profile?.weightLbs || 170;
+
+        const isStrength = /strength|weight|lift|resistance|muscle/i.test(input.exerciseType + " " + input.title);
+        const planType = isStrength ? "weight training" : "cardio";
+
+        const prompt = `You are an expert fitness coach. Generate a detailed ${planType} workout plan for: "${input.title}".
+
+User profile:
+- Fitness goal: ${fitnessGoal}
+- Weight: ${weightLbs} lbs
+- Duration: ${input.durationMinutes} minutes
+- Intensity: ${input.intensity}
+
+For ${isStrength ? "weight training: include warm-up, 4-6 exercises with sets/reps/rest, and cool-down. For each exercise include muscle group targeted." : "cardio: include warm-up, main intervals or steady-state breakdown with pace/effort levels, and cool-down. Include heart rate zones if relevant."}
+
+Be specific and practical. Return JSON only.`;
+
+        try {
+          const { invokeLLM } = await import("./_core/llm");
+          const response = await invokeLLM({
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+          });
+
+          const rawContent = response.choices?.[0]?.message?.content ?? "";
+          const text = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            return { plan: JSON.parse(jsonMatch[0]), planType, raw: text };
+          }
+          return { plan: null, planType, raw: text };
+        } catch (error) {
+          return { plan: null, planType, raw: `Failed to generate plan: ${String(error)}` };
+        }
+      }),
+    getEntriesForDate: protectedProcedure
+      .input(
+        z.object({
+          dayStart: z.number().int(),
+          dayEnd: z.number().int(),
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const db = await import("./db");
+        const entries = await db.getWorkoutEntries(ctx.user.id, 365);
+        return entries.filter(
+          (e) => e.recordedAt >= input.dayStart && e.recordedAt < input.dayEnd
+        );
+      }),
   }),
   bodyMeasurements: router({
     addEntry: protectedProcedure
