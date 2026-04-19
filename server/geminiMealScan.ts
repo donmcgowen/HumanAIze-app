@@ -115,6 +115,7 @@ async function callGeminiVision(
     generationConfig: {
       temperature: 0.1,
       maxOutputTokens: 2048,
+      responseMimeType: "application/json",
     },
   };
 
@@ -130,19 +131,42 @@ async function callGeminiVision(
   }
 
   const data = await response.json() as any;
-  const responseText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
-  if (!responseText) throw new Error("No response from Gemini vision API.");
+  // Gemini may return multiple parts (e.g. a "thought" part + a text part).
+  // Find the first part that contains actual text content.
+  const parts: any[] = data?.candidates?.[0]?.content?.parts ?? [];
+  const responseText: string = parts
+    .map((p: any) => (typeof p?.text === "string" ? p.text : ""))
+    .join("");
 
+  if (!responseText.trim()) {
+    const finishReason = data?.candidates?.[0]?.finishReason ?? "unknown";
+    throw new Error(`No response from Gemini vision API (finishReason: ${finishReason}).`);
+  }
+
+  // Strip markdown code fences and leading/trailing whitespace
   const cleaned = responseText
     .replace(/```json\s*/gi, "")
     .replace(/```\s*/gi, "")
     .trim();
 
+  // Try to extract a JSON object from the cleaned text
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not parse Gemini response as JSON.");
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch {
+      // fall through to full-text parse attempt
+    }
+  }
 
-  return JSON.parse(jsonMatch[0]);
+  // Last resort: try parsing the entire cleaned string
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    console.error("[GeminiMealScan] Raw response that failed to parse:", responseText.slice(0, 500));
+    throw new Error("Could not parse Gemini response as JSON.");
+  }
 }
 
 /**
