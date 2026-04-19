@@ -37,7 +37,7 @@ import { analyzeMealPhotoWithGemini, scanProductLabel } from "./geminiMealScan";
 import { storagePut } from "./storage";
 import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnalysis";
 import { searchFoodWithGemini, calculateMacrosForServing } from "./geminiFood";
-import { getLocalCachedFood, saveLocalCachedFood, clearGenericCacheEntries } from "./localFoodCache";
+import { getLocalCachedFood, saveLocalCachedFood, clearGenericCacheEntries, clearLocalCachedFood } from "./localFoodCache";
 import { searchOpenFoodFactsByName } from "./openFoodFacts";
 
 const rangeInput = z.object({
@@ -845,7 +845,19 @@ export const appRouter = router({
         // Note: generic USDA cache entries are bypassed for branded-looking queries (handled in getLocalCachedFood)
         const localCached = await getLocalCachedFood(normalizedQuery);
         if (localCached && localCached.length > 0) {
-          return localCached.slice(0, 5);
+          // Quality check: ensure at least one cached result actually matches the query
+          // This prevents stale branded cache from returning irrelevant results
+          const queryWords = normalizedQuery.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+          const hasRelevantResult = localCached.some(r => {
+            const nameLower = r.name.toLowerCase();
+            return queryWords.some(w => nameLower.includes(w));
+          });
+          if (hasRelevantResult) {
+            return localCached.slice(0, 5);
+          }
+          // Cache has irrelevant results — clear it and re-search
+          console.log(`[Food Search] Cache quality check failed for "${normalizedQuery}" — clearing stale cache`);
+          await clearLocalCachedFood(normalizedQuery);
         }
 
         // 2. Check DB cache if available (skip for branded queries since DB may have stale generic results)
@@ -1024,6 +1036,38 @@ export const appRouter = router({
         })
       )
       .query(({ ctx, input }) => getRecentFoods(ctx.user.id, input.limit)),
+    searchHistory: protectedProcedure
+      .input(z.object({ query: z.string().min(1) }))
+      .query(async ({ ctx, input }) => {
+        const query = input.query.trim().toLowerCase();
+        if (!query) return [];
+        // Fetch up to 365 days of food logs and search by name
+        const allLogs = await getRecentFoodLogsForInsights(ctx.user.id, 365);
+        // Filter by query words, deduplicate by food name (keep most recent)
+        const queryWords = query.split(/\s+/).filter(w => w.length > 1);
+        const matched = allLogs.filter((log: any) => {
+          const name = (log.foodName || "").toLowerCase();
+          return queryWords.some(w => name.includes(w));
+        });
+        // Deduplicate by food name (keep most recent)
+        const seen = new Set<string>();
+        const deduped: typeof matched = [];
+        for (const log of matched) {
+          const key = (log.foodName || "").toLowerCase().trim();
+          if (!seen.has(key)) {
+            seen.add(key);
+            deduped.push(log);
+          }
+        }
+        return deduped.slice(0, 8).map((log: any) => ({
+          foodName: log.foodName,
+          calories: log.calories,
+          proteinGrams: log.proteinGrams,
+          carbsGrams: log.carbsGrams,
+          fatGrams: log.fatGrams,
+          servingSize: log.servingSize,
+        }));
+      }),
   }),
   steps: router({
     logToday: protectedProcedure

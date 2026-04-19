@@ -116,6 +116,12 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
     { enabled: debouncedQuery.trim().length > 2, retry: 1 }
   );
 
+  // Search through all previously logged foods by query
+  const { data: historyMatches } = trpc.food.searchHistory.useQuery(
+    { query: debouncedQuery },
+    { enabled: debouncedQuery.trim().length > 2 }
+  );
+
   // When searching, mark which results match recent foods
   const recentFoodNames = new Set(recentFoods.map((f: any) => f.foodName.toLowerCase()));
 
@@ -268,37 +274,75 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
         </div>
       )}
 
-      {/* Search results list */}
-      {foodVariations && foodVariations.length > 0 && !selectedFood && (
-        <div className="space-y-2 max-h-64 overflow-y-auto">
-          {foodVariations.map((food: any, idx: number) => {
-            const isRecent = recentFoodNames.has(food.name.toLowerCase());
-            return (
+      {/* Previously logged foods matching the search query */}
+      {historyMatches && historyMatches.length > 0 && !selectedFood && debouncedQuery.trim().length > 2 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-xs text-cyan-400 font-medium">
+            <Clock className="h-3.5 w-3.5" />
+            <span>Previously Logged</span>
+          </div>
+          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+            {historyMatches.map((log: any, idx: number) => (
               <Card
-                key={idx}
-                className={`p-3 cursor-pointer transition-colors border-gray-700 ${
-                  isRecent
-                    ? "hover:bg-cyan-50/10 hover:border-cyan-500/50 border-cyan-800/40"
-                    : "hover:bg-blue-50/50 hover:border-blue-400"
-                }`}
-                onClick={() => handleSelectFood(food)}
+                key={`hist-${idx}`}
+                className="p-2.5 cursor-pointer transition-colors hover:bg-cyan-50/10 border-cyan-800/40 hover:border-cyan-500/50"
+                onClick={() => handleSelectRecentFood(log)}
               >
-                <div className="flex justify-between items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-1.5">
-                      {isRecent && <Clock className="h-3 w-3 text-cyan-400 flex-shrink-0" />}
-                      <p className="font-medium text-sm">{food.name}</p>
-                    </div>
-                    <p className="text-xs text-gray-400">{food.description}</p>
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Clock className="h-3 w-3 text-cyan-400 flex-shrink-0" />
+                    <p className="font-medium text-sm truncate">{log.foodName}</p>
                   </div>
-                  <div className="text-right text-xs ml-2">
-                    <p className="font-semibold">{Math.round(food.caloriesPer100g)} cal/100g</p>
-                    <p className="text-gray-400">{food.proteinPer100g}g P</p>
+                  <div className="text-right text-xs ml-2 flex-shrink-0">
+                    <p className="font-semibold text-cyan-400">{Math.round(log.calories)} cal</p>
+                    <p className="text-gray-400">{log.proteinGrams}g P</p>
                   </div>
                 </div>
+                {log.servingSize && log.servingSize !== "custom" && (
+                  <p className="text-xs text-gray-500 ml-5 mt-0.5">{log.servingSize}</p>
+                )}
               </Card>
-            );
-          })}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Search results list */}
+      {foodVariations && foodVariations.length > 0 && !selectedFood && (
+        <div className="space-y-2">
+          {(historyMatches && historyMatches.length > 0) && (
+            <div className="text-xs text-gray-400 font-medium">From Database</div>
+          )}
+          <div className="space-y-1.5 max-h-52 overflow-y-auto">
+            {foodVariations.map((food: any, idx: number) => {
+              const isRecent = recentFoodNames.has(food.name.toLowerCase());
+              return (
+                <Card
+                  key={idx}
+                  className={`p-3 cursor-pointer transition-colors border-gray-700 ${
+                    isRecent
+                      ? "hover:bg-cyan-50/10 hover:border-cyan-500/50 border-cyan-800/40"
+                      : "hover:bg-blue-50/50 hover:border-blue-400"
+                  }`}
+                  onClick={() => handleSelectFood(food)}
+                >
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1.5">
+                        {isRecent && <Clock className="h-3 w-3 text-cyan-400 flex-shrink-0" />}
+                        <p className="font-medium text-sm">{food.name}</p>
+                      </div>
+                      <p className="text-xs text-gray-400">{food.description}</p>
+                    </div>
+                    <div className="text-right text-xs ml-2">
+                      <p className="font-semibold">{Math.round(food.caloriesPer100g)} cal/100g</p>
+                      <p className="text-gray-400">{food.proteinPer100g}g P</p>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
         </div>
       )}
 
