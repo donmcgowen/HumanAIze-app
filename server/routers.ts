@@ -911,7 +911,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
             console.warn("[AI Meal Suggestions] No GEMINI_API_KEY configured");
             return [];
           }
-          const GEMINI_MODEL = "gemini-2.5-flash";
+          const GEMINI_MODEL = "gemini-2.0-flash";
           const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ENV.geminiApiKey}`;
           const geminiRes = await fetch(geminiUrl, {
             method: "POST",

@@ -328,7 +328,7 @@ async function invokeGeminiFallback(params: InvokeParams): Promise<InvokeResult>
     throw new Error("Neither forge API nor GEMINI_API_KEY is available for LLM calls.");
   }
 
-  const GEMINI_MODEL = "gemini-2.5-flash";
+  const GEMINI_MODEL = "gemini-2.0-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiKey}`;
 
   const contents = convertMessagesToGemini(params.messages);
