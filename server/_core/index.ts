@@ -28,9 +28,9 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startBackgroundSync } from "../backgroundSync";
-import { getDatabaseHealth } from "../db";
+import { getDatabaseHealth, clearAllFoodSearchCache } from "../db";
 import { getAuthBackendHealth } from "../auth";
-import { clearGenericCacheEntries } from "../localFoodCache";
+import { clearGenericCacheEntries, clearAllCacheEntries } from "../localFoodCache";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -201,14 +201,24 @@ async function startServer() {
     console.log(`Server running on http://localhost:${port}/`);
   });
 
-  // Clear stale generic USDA cache entries on startup so branded product searches work correctly
+  // Clear ALL food cache entries on startup — macro normalization logic was updated
+  // to correctly normalize USDA branded macros to per-100g. Old cached values are stale.
   try {
-    const cleared = await clearGenericCacheEntries();
+    const cleared = await clearAllCacheEntries();
     if (cleared > 0) {
-      console.log(`[Startup] Cleared ${cleared} stale generic food cache entries`);
+      console.log(`[Startup] Cleared ${cleared} stale local food cache entries (macro normalization update)`);
     }
   } catch (error) {
-    console.warn("[Startup] Failed to clear generic food cache:", error);
+    console.warn("[Startup] Failed to clear local food cache:", error);
+  }
+  // Also clear DB food search cache
+  try {
+    const dbCleared = await clearAllFoodSearchCache();
+    if (dbCleared > 0) {
+      console.log(`[Startup] Cleared ${dbCleared} stale DB food cache entries (macro normalization update)`);
+    }
+  } catch (error) {
+    console.warn("[Startup] Failed to clear DB food cache:", error);
   }
 
   // Start background sync scheduler (every 5 minutes)

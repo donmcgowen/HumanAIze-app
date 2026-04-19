@@ -124,25 +124,31 @@ const UNIT_TO_GRAMS: Record<string, number> = {
   cup: 240,         // 1 cup = 240ml/g
   tbsp: 15,         // 1 tablespoon = 15ml
   tsp: 5,           // 1 teaspoon = 5ml
-  scoop: 30,        // default scoop ~30g (overridden by serving size when available)
+  scoop: 30,        // default scoop ~30g (overridden by servingWeightG when available)
   slice: 28,        // typical bread slice ~28g
   piece: 50,        // generic piece ~50g
   egg: 50,          // large egg ~50g
-  serving: 100,     // generic serving
+  serving: 100,     // generic serving (overridden by servingWeightG when available)
 };
 
 export function calculateMacrosForServing(
   food: FoodVariation,
   amount: number,
-  unit: string
+  unit: string,
+  servingWeightG?: number  // actual gram weight of 1 scoop/serving (from product label)
 ): {
   calories: number;
   protein: number;
   carbs: number;
   fat: number;
 } {
-  // Convert unit to grams
-  const conversionFactor = UNIT_TO_GRAMS[unit] ?? 1;
+  // For scoop/serving units: use the actual product serving weight if provided
+  let conversionFactor: number;
+  if ((unit === "scoop" || unit === "serving") && servingWeightG && servingWeightG > 0) {
+    conversionFactor = servingWeightG;
+  } else {
+    conversionFactor = UNIT_TO_GRAMS[unit] ?? 1;
+  }
   const grams = amount * conversionFactor;
 
   // Calculate macros based on per 100g values

@@ -105,8 +105,8 @@ function parseServingSizeForInput(servingSize?: string): { amount: string; unit:
 function getSmartUnits(foodName: string, description?: string): { value: string; label: string }[] {
   const text = `${foodName} ${description ?? ""}`.toLowerCase();
 
-  // Powder / supplement category
-  const isPowder = /powder|whey|protein\s*(powder|supplement)|creatine|pre.?workout|bcaa|amino|mass\s*gainer|meal\s*replacement|shake\s*mix/.test(text);
+  // Powder / supplement category — catches "Muscle Milk Pro Series Protein Powder", "Whey Protein", etc.
+  const isPowder = /powder|whey|creatine|pre.?workout|bcaa|amino|mass\s*gainer|meal\s*replacement|shake\s*mix|protein\s*(powder|supplement|shake|blend|isolate|concentrate)|supplement\s*facts/.test(text);
   if (isPowder) return [
     { value: "scoop", label: "Scoop" },
     { value: "g", label: "Grams (g)" },
@@ -165,12 +165,28 @@ function getSmartUnits(foodName: string, description?: string): { value: string;
   ];
 }
 
+// Parse gram weight from a serving size string like "53g", "1.87oz", "2 scoops (82g)"
+function parseServingWeightG(servingSize?: string): number | undefined {
+  if (!servingSize) return undefined;
+  // Try to find explicit gram value in parentheses first: "2 scoops (82g)" → 82
+  const parenMatch = servingSize.match(/\((\d+(?:\.\d+)?)\s*g\)/i);
+  if (parenMatch) return parseFloat(parenMatch[1]);
+  // Direct gram value: "53g" → 53
+  const gMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g$/i);
+  if (gMatch) return parseFloat(gMatch[1]);
+  // Oz value: "1.87oz" → convert to grams
+  const ozMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*oz$/i);
+  if (ozMatch) return parseFloat(ozMatch[1]) * 28.35;
+  return undefined;
+}
+
 function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedFood, setSelectedFood] = useState<any>(null);
   const [servingAmount, setServingAmount] = useState("100");
   const [servingUnit, setServingUnit] = useState<string>("g");
+  const [servingWeightG, setServingWeightG] = useState<number | undefined>(undefined);
 
   // Debounce: wait 500ms after user stops typing before searching
   useEffect(() => {
@@ -214,6 +230,7 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
           fatPer100g: selectedFood.fatPer100g,
           amount: parseFloat(servingAmount) || 0,
           unit: servingUnit,
+          servingWeightG: servingWeightG,
         }
       : skipToken,
     { enabled: !!selectedFood && !selectedFood.isRecentLog && !!servingAmount }
@@ -221,17 +238,32 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
 
   const handleSelectFood = (food: any) => {
     setSelectedFood(food);
-    // Try to parse the serving size string first
+
+    // Determine smart unit list based on food name/description
+    const smartUnits = getSmartUnits(food?.name ?? "", food?.description ?? "");
+    const defaultUnit = smartUnits[0]?.value ?? "g";
+
+    // Parse the actual gram weight of one serving from the serving size string
+    const weightG = parseServingWeightG(food?.servingSize);
+    setServingWeightG(weightG);
+
+    // Try to parse the serving size string to get a human-friendly default amount/unit
     const parsedServing = parseServingSizeForInput(food?.servingSize);
     if (parsedServing) {
+      // If the food is a powder/supplement and the parsed unit is grams,
+      // override to scoops (using the gram weight as the scoop weight)
+      if (defaultUnit === "scoop" && parsedServing.unit === "g") {
+        setServingAmount("1");
+        setServingUnit("scoop");
+        // servingWeightG already set above from the gram value in servingSize
+        return;
+      }
       setServingAmount(parsedServing.amount);
       setServingUnit(parsedServing.unit);
       return;
     }
+
     // Fall back to smart unit detection based on food name/description
-    const smartUnits = getSmartUnits(food?.name ?? "", food?.description ?? "");
-    const defaultUnit = smartUnits[0]?.value ?? "g";
-    // Set a sensible default amount per unit type
     const defaultAmounts: Record<string, string> = {
       scoop: "1", cup: "1", egg: "1", slice: "1", piece: "1",
       tbsp: "1", tsp: "1", serving: "1", "fl oz": "8", ml: "240",
@@ -275,9 +307,14 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
       return;
     }
     if (calculatedMacros) {
+      // Build a human-readable serving size label
+      let servingSizeLabel = `${servingAmount} ${servingUnit}`;
+      if ((servingUnit === "scoop" || servingUnit === "serving") && servingWeightG) {
+        servingSizeLabel = `${servingAmount} ${servingUnit} (${Math.round(parseFloat(servingAmount) * servingWeightG)}g)`;
+      }
       onFoodAdded({
         foodName: selectedFood.name,
-        servingSize: `${servingAmount}${servingUnit}`,
+        servingSize: servingSizeLabel,
         calories: calculatedMacros.calories,
         proteinGrams: calculatedMacros.protein,
         carbsGrams: calculatedMacros.carbs,

@@ -1453,6 +1453,30 @@ export async function cleanupExpiredCache(): Promise<void> {
   }
 }
 
+/**
+ * Clear ALL food search cache entries from the database.
+ * Use after macro normalization logic changes to force fresh USDA data.
+ */
+export async function clearAllFoodSearchCache(): Promise<number> {
+  const db = await getDb();
+  if (!db) {
+    console.warn("[Database] Cannot clear food search cache: database not available");
+    return 0;
+  }
+
+  try {
+    // Count first
+    const all = await db.select({ id: foodSearchCache.id }).from(foodSearchCache);
+    const count = all.length;
+    await db.delete(foodSearchCache);
+    console.log(`[Database] Cleared ALL ${count} food search cache entries (macro normalization update)`);
+    return count;
+  } catch (error) {
+    console.warn("[Database] Error clearing food search cache:", error);
+    return 0;
+  }
+}
+
 // Progress Photos Functions
 export async function addProgressPhoto(userId: number, photo: Omit<InsertProgressPhoto, "userId">): Promise<ProgressPhoto> {
   const db = await getDb();

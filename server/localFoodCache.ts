@@ -125,3 +125,15 @@ export async function clearGenericCacheEntries(): Promise<number> {
   console.log(`[LocalFoodCache] Cleared ${cleared} generic cache entries`);
   return cleared;
 }
+
+/**
+ * Clear ALL cached food entries (both branded and generic).
+ * Use this when the macro normalization logic has changed and all cached values are stale.
+ */
+export async function clearAllCacheEntries(): Promise<number> {
+  const store = await readCache();
+  const count = Object.keys(store).length;
+  await writeCache({});
+  console.log(`[LocalFoodCache] Cleared ALL ${count} food cache entries (schema migration)`);
+  return count;
+}

@@ -1392,6 +1392,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           fatPer100g: z.number().nonnegative(),
           amount: z.number().positive(),
           unit: z.string().min(1),  // g, oz, ml, cup, tbsp, tsp, scoop, slice, piece, egg, serving, fl oz
+          servingWeightG: z.number().positive().optional(), // actual gram weight of 1 scoop/serving
         })
       )
       .query(({ input }) => {
@@ -1403,7 +1404,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           carbsPer100g: input.carbsPer100g,
           fatPer100g: input.fatPer100g,
         };
-        return calculateMacrosForServing(food, input.amount, input.unit);
+        return calculateMacrosForServing(food, input.amount, input.unit, input.servingWeightG);
       }),
     getRecent: protectedProcedure
       .input(
