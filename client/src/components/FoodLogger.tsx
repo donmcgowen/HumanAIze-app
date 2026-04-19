@@ -1,7 +1,7 @@
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit2, Check, X, Loader2, Star } from "lucide-react";
+import { Plus, Trash2, Edit2, Check, X, Loader2, Star, ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 import { useState, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { AddFoodModal } from "./AddFoodModal";
@@ -14,6 +14,45 @@ const MEAL_SECTIONS: { value: MealType; label: string }[] = [
   { value: "dinner", label: "DINNER" },
   { value: "snack", label: "SNACKS" },
 ];
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+/** Return a YYYY-MM-DD string for a Date in local time */
+function toLocalDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Parse a YYYY-MM-DD string to a local-midnight Date */
+function fromLocalDateStr(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/** Start-of-day timestamp (local midnight) for a given Date */
+function startOfLocalDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+}
+
+/** End-of-day timestamp (local 23:59:59.999) for a given Date */
+function endOfLocalDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
+}
+
+/** Format a Date for display, e.g. "Today", "Yesterday", or "Mon, Apr 14" */
+function formatDateLabel(d: Date): string {
+  const todayStr = toLocalDateStr(new Date());
+  const dStr = toLocalDateStr(d);
+  if (dStr === todayStr) return "Today";
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dStr === toLocalDateStr(yesterday)) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+// ── MacroCircle ───────────────────────────────────────────────────────────────
 
 interface MacroCircleProps {
   value: number;
@@ -44,17 +83,29 @@ function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCi
   );
 }
 
+// ── FoodLogger ────────────────────────────────────────────────────────────────
+
 export function FoodLogger() {
-  // State
+  // ── Date state (defaults to today) ──
+  const [selectedDateStr, setSelectedDateStr] = useState<string>(() => toLocalDateStr(new Date()));
+  const [showCalendar, setShowCalendar] = useState(false);
+
+  const selectedDate = useMemo(() => fromLocalDateStr(selectedDateStr), [selectedDateStr]);
+  const isToday = selectedDateStr === toLocalDateStr(new Date());
+
+  const dayStart = useMemo(() => startOfLocalDay(selectedDate), [selectedDate]);
+  const dayEnd = useMemo(() => endOfLocalDay(selectedDate), [selectedDate]);
+
+  // ── Other state ──
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
   const [showAddFoodModal, setShowAddFoodModal] = useState(false);
   const [activeMealType, setActiveMealType] = useState<MealType>("breakfast");
 
-  // Queries
+  // ── Queries ──
   const { data: foodLogs, isLoading, refetch } = trpc.food.getDayLogs.useQuery({
-    startOfDay: new Date(new Date().setHours(0, 0, 0, 0)).getTime(),
-    endOfDay: new Date(new Date().setHours(23, 59, 59, 999)).getTime(),
+    startOfDay: dayStart,
+    endOfDay: dayEnd,
   });
 
   const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
@@ -75,7 +126,7 @@ export function FoodLogger() {
 
   const targetCalories = toPositiveNumberOrNull(userProfile?.dailyCalorieTarget) ?? 0;
 
-  // Mutations
+  // ── Mutations ──
   const addFoodLog = trpc.food.addLog.useMutation({
     onSuccess: () => { refetch(); toast.success("Food logged successfully"); },
     onError: () => toast.error("Failed to log food"),
@@ -102,12 +153,11 @@ export function FoodLogger() {
     onSuccess: () => { refetchFavorites(); toast.success("Removed from favorites"); },
   });
 
-  // Computed values
+  // ── Computed values ──
   const dailyTotals = useMemo(() => {
     if (!foodLogs) return { protein: 0, carbs: 0, fat: 0, calories: 0, sugar: 0 };
     return foodLogs.reduce(
       (acc: any, log: any) => {
-        // Parse sugar from notes field if present
         let sugar = 0;
         if (log.notes) {
           const match = log.notes.match(/Sugar:\s*([\d.]+)g/i);
@@ -143,7 +193,25 @@ export function FoodLogger() {
     return cal;
   }, [foodsByMeal]);
 
-  // Handlers
+  // ── Date navigation ──
+  const goToPrevDay = () => {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() - 1);
+    setSelectedDateStr(toLocalDateStr(d));
+  };
+
+  const goToNextDay = () => {
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + 1);
+    // Don't allow navigating into the future
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (d < tomorrow) setSelectedDateStr(toLocalDateStr(d));
+  };
+
+  const goToToday = () => setSelectedDateStr(toLocalDateStr(new Date()));
+
+  // ── Handlers ──
   const handleEditStart = (log: any) => {
     setEditingId(log.id);
     setEditValues({
@@ -166,6 +234,8 @@ export function FoodLogger() {
 
   const handleAddFoodFromModal = (food: any) => {
     const sugarGrams = Number(food.sugarGrams || 0);
+    // Use noon of the selected date as the loggedAt timestamp
+    const loggedAt = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 12, 0, 0, 0).getTime();
     addFoodLog.mutate({
       foodName: food.foodName,
       servingSize: food.servingSize,
@@ -174,7 +244,7 @@ export function FoodLogger() {
       carbsGrams: Math.round(food.carbsGrams * 10) / 10,
       fatGrams: Math.round(food.fatGrams * 10) / 10,
       mealType: activeMealType,
-      loggedAt: Date.now(),
+      loggedAt,
       notes: sugarGrams > 0 ? `Sugar: ${Math.round(sugarGrams * 10) / 10}g` : undefined,
     });
     toast.success(`Added ${food.foodName} to ${activeMealType}`);
@@ -195,6 +265,74 @@ export function FoodLogger() {
 
   return (
     <div className="space-y-4">
+
+      {/* ── Date Navigator ── */}
+      <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-800/60 border border-white/10 px-4 py-3">
+        {/* Prev button */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={goToPrevDay}
+          className="text-slate-300 hover:text-white hover:bg-white/10 h-9 w-9 p-0"
+        >
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+
+        {/* Date display + calendar picker */}
+        <div className="flex items-center gap-2 flex-1 justify-center relative">
+          <span className="text-white font-semibold text-base">{formatDateLabel(selectedDate)}</span>
+          <span className="text-slate-400 text-sm hidden sm:inline">
+            {isToday ? "" : `· ${selectedDate.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`}
+          </span>
+          <button
+            onClick={() => setShowCalendar(!showCalendar)}
+            className="text-slate-400 hover:text-cyan-400 transition-colors ml-1"
+            title="Pick a date"
+          >
+            <Calendar className="h-4 w-4" />
+          </button>
+
+          {/* Calendar dropdown */}
+          {showCalendar && (
+            <div className="absolute top-full mt-2 z-50 bg-slate-900 border border-slate-700 rounded-lg p-3 shadow-xl">
+              <input
+                type="date"
+                value={selectedDateStr}
+                max={toLocalDateStr(new Date())}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    setSelectedDateStr(e.target.value);
+                    setShowCalendar(false);
+                  }
+                }}
+                className="bg-slate-800 border border-slate-600 text-white rounded px-2 py-1 text-sm focus:outline-none focus:border-cyan-400"
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Next button (disabled if today) */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={goToNextDay}
+          disabled={isToday}
+          className="text-slate-300 hover:text-white hover:bg-white/10 h-9 w-9 p-0 disabled:opacity-30"
+        >
+          <ChevronRight className="h-5 w-5" />
+        </Button>
+      </div>
+
+      {/* "Jump to Today" pill — only shown when viewing a past date */}
+      {!isToday && (
+        <button
+          onClick={goToToday}
+          className="w-full text-center text-xs text-cyan-400 hover:text-cyan-300 py-1 transition-colors"
+        >
+          ← Back to Today
+        </button>
+      )}
+
       {/* ── Macro Summary ── */}
       <div className="rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-white/10 p-6">
         {/* Large Calories circle centered */}
@@ -282,7 +420,7 @@ export function FoodLogger() {
                           <Button size="sm" onClick={() => handleEditSave(log.id)} className="bg-green-600 hover:bg-green-700">
                             <Check className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" onClick={() => { setEditingId(null); setEditValues({}); }} variant="outline">
+                          <Button size="sm" variant="ghost" onClick={() => { setEditingId(null); setEditValues({}); }}>
                             <X className="h-4 w-4" />
                           </Button>
                         </div>
@@ -343,7 +481,7 @@ export function FoodLogger() {
               </div>
             )}
 
-            {/* Single Add Food button */}
+            {/* Add Food button */}
             <button
               onClick={() => openAddFood(meal)}
               className="w-full flex items-center justify-center gap-2 py-3 text-sm font-bold text-white bg-cyan-700/60 hover:bg-cyan-600/70 transition-colors border-t border-white/10"
