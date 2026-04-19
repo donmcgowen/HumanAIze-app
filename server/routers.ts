@@ -907,8 +907,45 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
         try {
           // Call Gemini directly — avoids forge API IP restrictions
           const { ENV } = await import("./_core/env");
-          if (!ENV.geminiApiKey) {
-            console.warn("[AI Meal Suggestions] No GEMINI_API_KEY configured");
+
+          // Helper: validate and normalise a suggestion array (defined first to avoid hoisting issues)
+          const normaliseSuggestions = (arr: any[]): any[] =>
+            arr
+              .filter((s: any) => s && typeof s === "object" && s.name)
+              .slice(0, 3)
+              .map((s: any) => ({
+                name: s.name,
+                description: s.description || "",
+                calories: Number(s.calories) || 0,
+                protein: Number(s.protein) || 0,
+                carbs: Number(s.carbs) || 0,
+                fat: Number(s.fat) || 0,
+                mealType: s.mealType || "snack",
+              }));
+
+          // Helper: parse a raw text response into suggestions array
+          const parseTextToSuggestions = (rawText: string): any[] | null => {
+            const arrayMatch = rawText.match(/\[\s*\{[\s\S]*?\}\s*\]/);
+            if (arrayMatch) {
+              try {
+                const arr = JSON.parse(arrayMatch[0]);
+                if (Array.isArray(arr) && arr.length > 0) return normaliseSuggestions(arr);
+              } catch {}
+            }
+            try {
+              const parsed = JSON.parse(rawText);
+              if (Array.isArray(parsed) && parsed.length > 0) return normaliseSuggestions(parsed);
+              for (const key of ["suggestions", "meals", "meal_suggestions", "data", "results"]) {
+                if (Array.isArray(parsed[key]) && parsed[key].length > 0) return normaliseSuggestions(parsed[key]);
+              }
+              const firstArrayKey = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
+              if (firstArrayKey && parsed[firstArrayKey].length > 0) return normaliseSuggestions(parsed[firstArrayKey]);
+            } catch {}
+            return null;
+          };
+
+          if (!ENV.geminiApiKey && !ENV.forgeApiKey) {
+            console.warn("[AI Meal Suggestions] No AI API keys configured");
             return [];
           }
           const GEMINI_MODEL = "gemini-2.0-flash";
@@ -928,49 +965,47 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           if (!geminiRes.ok) {
             const errText = await geminiRes.text();
             console.error("[AI Meal Suggestions] Gemini API error:", geminiRes.status, errText.slice(0, 300));
+
+            // Gemini quota exhausted — fall back to forge/OpenAI API
+            if (geminiRes.status === 429 && ENV.forgeApiKey) {
+              console.log("[AI Meal Suggestions] Gemini quota exhausted, falling back to forge/OpenAI API");
+              const forgeBase = (ENV.forgeApiUrl || "https://api.openai.com").replace(/\/$/, "");
+              const forgeUrl = forgeBase.includes("openai.azure.com") ? forgeBase : `${forgeBase}/v1/chat/completions`;
+              const forgeRes = await fetch(forgeUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${ENV.forgeApiKey}`,
+                },
+                body: JSON.stringify({
+                  model: ENV.llmModel || "gpt-4o-mini",
+                  messages: [{ role: "user", content: prompt }],
+                  response_format: { type: "json_object" },
+                  max_tokens: 2048,
+                }),
+              });
+              if (!forgeRes.ok) {
+                const forgeErr = await forgeRes.text();
+                console.error("[AI Meal Suggestions] Forge fallback error:", forgeRes.status, forgeErr.slice(0, 200));
+                return [];
+              }
+              const forgeData = await forgeRes.json() as any;
+              const forgeText = forgeData?.choices?.[0]?.message?.content ?? "";
+              console.log("[AI Meal Suggestions] Forge fallback raw response (first 300):", forgeText.slice(0, 300));
+              const forgeResult = parseTextToSuggestions(forgeText);
+              if (forgeResult && forgeResult.length > 0) return forgeResult;
+              console.warn("[AI Meal Suggestions] Could not parse forge fallback response");
+            }
             return [];
           }
           const geminiData = await geminiRes.json() as any;
-          const rawContent = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+          const parts: any[] = geminiData?.candidates?.[0]?.content?.parts ?? [];
+          const rawContent = parts.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join("");
           const text = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
           console.log("[AI Meal Suggestions] Raw response (first 500 chars):", text.slice(0, 500));
 
-          // Helper: validate and normalise a suggestion array
-          const normaliseSuggestions = (arr: any[]): any[] =>
-            arr
-              .filter((s: any) => s && typeof s === "object" && s.name)
-              .slice(0, 3)
-              .map((s: any) => ({
-                name: s.name,
-                description: s.description || "",
-                calories: Number(s.calories) || 0,
-                protein: Number(s.protein) || 0,
-                carbs: Number(s.carbs) || 0,
-                fat: Number(s.fat) || 0,
-                mealType: s.mealType || "snack",
-              }));
-
-          // 1. Try to extract a JSON array directly from the text
-          const arrayMatch = text.match(/\[\s*\{[\s\S]*?\}\s*\]/);
-          if (arrayMatch) {
-            try {
-              const arr = JSON.parse(arrayMatch[0]);
-              if (Array.isArray(arr) && arr.length > 0) return normaliseSuggestions(arr);
-            } catch {}
-          }
-
-          // 2. Try parsing the entire response as JSON
-          try {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed) && parsed.length > 0) return normaliseSuggestions(parsed);
-            // Common wrapper keys Gemini may use
-            for (const key of ["suggestions", "meals", "meal_suggestions", "data", "results"]) {
-              if (Array.isArray(parsed[key]) && parsed[key].length > 0) return normaliseSuggestions(parsed[key]);
-            }
-            // Single object wrapping an array under any key
-            const firstArrayKey = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
-            if (firstArrayKey && parsed[firstArrayKey].length > 0) return normaliseSuggestions(parsed[firstArrayKey]);
-          } catch {}
+          const result = parseTextToSuggestions(text);
+          if (result && result.length > 0) return result;
 
           console.warn("[AI Meal Suggestions] Could not parse suggestions from response");
           return [];
