@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { Zap, RefreshCw, Utensils } from "lucide-react";
+import { Scale, RefreshCw, Utensils } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { StepCounter } from "@/components/StepCounter";
@@ -48,6 +48,7 @@ export default function Dashboard() {
     refetch: refetchDashboard,
   } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
+  const { data: weightEntries = [] } = trpc.weight.getEntries.useQuery({ days: 365 });
   const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
@@ -219,6 +220,39 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+      {/* Weight Summary */}
+      {weightEntries.length > 0 && (() => {
+        const sorted = [...(weightEntries as any[])].sort((a, b) => a.date - b.date);
+        const startWeight = sorted[0]?.weight ?? 0;
+        const currentWeight = sorted[sorted.length - 1]?.weight ?? 0;
+        const weightLoss = startWeight - currentWeight;
+        const isLoss = weightLoss > 0;
+        return (
+          <div className="space-y-3">
+            <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+              <Scale className="w-5 h-5 text-cyan-400" />
+              Weight Summary
+            </h2>
+            <div className="grid gap-4 grid-cols-3">
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 text-center">
+                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Starting Weight</div>
+                <div className="text-2xl font-bold text-slate-200">{startWeight} lbs</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 text-center">
+                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Current Weight</div>
+                <div className="text-2xl font-bold text-cyan-400">{currentWeight} lbs</div>
+              </div>
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 text-center">
+                <div className="text-xs text-slate-400 uppercase tracking-wide mb-2">Weight Loss</div>
+                <div className={`text-2xl font-bold ${isLoss ? "text-green-400" : "text-red-400"}`}>
+                  {isLoss ? "-" : "+"}{Math.abs(weightLoss).toFixed(1)} lbs
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Steps */}
       <div className="space-y-3">
