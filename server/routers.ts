@@ -268,6 +268,7 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const { createUser } = await import("./auth");
         const { sdk } = await import("./_core/sdk");
+        const { sendWelcomeEmail } = await import("./emailService");
         
         const result = await createUser(input.username, input.email, input.password, input.name);
         if (!result.success) {
@@ -287,6 +288,11 @@ export const appRouter = router({
           ...cookieOptions,
           maxAge: 365 * 24 * 60 * 60 * 1000,
         });
+
+        // Send welcome email — fire-and-forget (don't block signup if email fails)
+        sendWelcomeEmail(input.email, input.name || input.username).catch((err) =>
+          console.error(`[Email] Failed to send welcome email to ${input.email}:`, err)
+        );
 
         return {
           success: true,
