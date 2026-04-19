@@ -84,14 +84,85 @@ interface SearchFoodTabProps {
   mealType?: string;
 }
 
-function parseServingSizeForInput(servingSize?: string): { amount: string; unit: "g" | "oz" } | null {
+function parseServingSizeForInput(servingSize?: string): { amount: string; unit: string } | null {
   if (!servingSize) return null;
-  const match = servingSize.trim().match(/(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces)\b/i);
+  const match = servingSize.trim().match(/(\d+(?:\.\d+)?)\s*(g|gram|grams|oz|ounce|ounces|ml|scoop|scoops|cup|cups|tbsp|tsp|slice|slices|piece|pieces|egg|eggs|serving|servings|fl\s*oz)\b/i);
   if (!match) return null;
 
   const amount = match[1];
-  const unit = /^oz|ounce/i.test(match[2]) ? "oz" : "g";
+  const rawUnit = match[2].toLowerCase().replace(/s$/, "").replace(/fl\s*oz/, "fl oz");
+  const unitMap: Record<string, string> = {
+    gram: "g", grams: "g", ounce: "oz", ounces: "oz",
+    scoop: "scoop", scoops: "scoop", cup: "cup", cups: "cup",
+    slice: "slice", slices: "slice", piece: "piece", pieces: "piece",
+    egg: "egg", eggs: "egg", serving: "serving", servings: "serving",
+  };
+  const unit = unitMap[rawUnit] ?? rawUnit;
   return { amount, unit };
+}
+
+// Returns context-aware unit options based on food name/description
+function getSmartUnits(foodName: string, description?: string): { value: string; label: string }[] {
+  const text = `${foodName} ${description ?? ""}`.toLowerCase();
+
+  // Powder / supplement category
+  const isPowder = /powder|whey|protein\s*(powder|supplement)|creatine|pre.?workout|bcaa|amino|mass\s*gainer|meal\s*replacement|shake\s*mix/.test(text);
+  if (isPowder) return [
+    { value: "scoop", label: "Scoop" },
+    { value: "g", label: "Grams (g)" },
+    { value: "oz", label: "Ounces (oz)" },
+  ];
+
+  // Liquid / beverage category
+  const isLiquid = /milk|juice|water|soda|coffee|tea|smoothie|shake|drink|beverage|broth|soup|oil|sauce|syrup|cream|yogurt\s*drink|kefir|almond\s*milk|oat\s*milk|coconut\s*milk/.test(text);
+  if (isLiquid) return [
+    { value: "cup", label: "Cup" },
+    { value: "fl oz", label: "Fl oz" },
+    { value: "ml", label: "Milliliters (ml)" },
+    { value: "tbsp", label: "Tablespoon (tbsp)" },
+    { value: "tsp", label: "Teaspoon (tsp)" },
+    { value: "g", label: "Grams (g)" },
+  ];
+
+  // Eggs
+  const isEgg = /\begg\b/.test(text);
+  if (isEgg) return [
+    { value: "egg", label: "Egg (whole)" },
+    { value: "g", label: "Grams (g)" },
+    { value: "oz", label: "Ounces (oz)" },
+  ];
+
+  // Bread / baked goods
+  const isBread = /bread|toast|tortilla|wrap|bagel|muffin|bun|roll|pita|naan|croissant/.test(text);
+  if (isBread) return [
+    { value: "slice", label: "Slice" },
+    { value: "piece", label: "Piece" },
+    { value: "g", label: "Grams (g)" },
+    { value: "oz", label: "Ounces (oz)" },
+  ];
+
+  // Meat / fish / poultry — no scoops
+  const isMeat = /chicken|beef|steak|pork|turkey|salmon|tuna|tilapia|shrimp|fish|lamb|bison|venison|ground\s*(beef|turkey|chicken)|breast|thigh|fillet/.test(text);
+  if (isMeat) return [
+    { value: "oz", label: "Ounces (oz)" },
+    { value: "g", label: "Grams (g)" },
+  ];
+
+  // Condiments / spreads
+  const isCondiment = /butter|peanut\s*butter|almond\s*butter|mayo|mustard|ketchup|dressing|hummus|guacamole|jam|jelly|honey|nutella|cream\s*cheese|spread/.test(text);
+  if (isCondiment) return [
+    { value: "tbsp", label: "Tablespoon (tbsp)" },
+    { value: "tsp", label: "Teaspoon (tsp)" },
+    { value: "g", label: "Grams (g)" },
+    { value: "oz", label: "Ounces (oz)" },
+  ];
+
+  // Default: grams + oz
+  return [
+    { value: "g", label: "Grams (g)" },
+    { value: "oz", label: "Ounces (oz)" },
+    { value: "serving", label: "Serving" },
+  ];
 }
 
 function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTabProps) {
@@ -99,7 +170,7 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedFood, setSelectedFood] = useState<any>(null);
   const [servingAmount, setServingAmount] = useState("100");
-  const [servingUnit, setServingUnit] = useState<"g" | "oz">("g");
+  const [servingUnit, setServingUnit] = useState<string>("g");
 
   // Debounce: wait 500ms after user stops typing before searching
   useEffect(() => {
@@ -150,14 +221,24 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
 
   const handleSelectFood = (food: any) => {
     setSelectedFood(food);
+    // Try to parse the serving size string first
     const parsedServing = parseServingSizeForInput(food?.servingSize);
     if (parsedServing) {
       setServingAmount(parsedServing.amount);
       setServingUnit(parsedServing.unit);
       return;
     }
-    setServingAmount("100");
-    setServingUnit("g");
+    // Fall back to smart unit detection based on food name/description
+    const smartUnits = getSmartUnits(food?.name ?? "", food?.description ?? "");
+    const defaultUnit = smartUnits[0]?.value ?? "g";
+    // Set a sensible default amount per unit type
+    const defaultAmounts: Record<string, string> = {
+      scoop: "1", cup: "1", egg: "1", slice: "1", piece: "1",
+      tbsp: "1", tsp: "1", serving: "1", "fl oz": "8", ml: "240",
+      oz: "3", g: "100",
+    };
+    setServingAmount(defaultAmounts[defaultUnit] ?? "100");
+    setServingUnit(defaultUnit);
   };
 
   const handleSelectRecentFood = (log: any) => {
@@ -410,11 +491,12 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
                   <select
                     id="serving-unit"
                     value={servingUnit}
-                    onChange={(e) => setServingUnit(e.target.value as "g" | "oz")}
+                    onChange={(e) => setServingUnit(e.target.value)}
                     className="w-full px-2 py-1 text-sm border border-gray-600 rounded bg-gray-800 text-white"
                   >
-                    <option value="g">Grams (g)</option>
-                    <option value="oz">Ounces (oz)</option>
+                    {getSmartUnits(selectedFood.name ?? "", selectedFood.description ?? "").map((u) => (
+                      <option key={u.value} value={u.value}>{u.label}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1">

@@ -115,18 +115,35 @@ If the query is a GENERIC whole food (e.g. "chicken", "rice", "broccoli"):
   }
 }
 
+// Unit conversion map to grams (approximate, per 1 unit)
+const UNIT_TO_GRAMS: Record<string, number> = {
+  g: 1,
+  oz: 28.35,
+  ml: 1,           // water/liquid density ~1g/ml
+  "fl oz": 29.57,  // fluid ounce
+  cup: 240,         // 1 cup = 240ml/g
+  tbsp: 15,         // 1 tablespoon = 15ml
+  tsp: 5,           // 1 teaspoon = 5ml
+  scoop: 30,        // default scoop ~30g (overridden by serving size when available)
+  slice: 28,        // typical bread slice ~28g
+  piece: 50,        // generic piece ~50g
+  egg: 50,          // large egg ~50g
+  serving: 100,     // generic serving
+};
+
 export function calculateMacrosForServing(
   food: FoodVariation,
   amount: number,
-  unit: "g" | "oz"
+  unit: string
 ): {
   calories: number;
   protein: number;
   carbs: number;
   fat: number;
 } {
-  // Convert ounces to grams if needed
-  const grams = unit === "oz" ? amount * 28.35 : amount;
+  // Convert unit to grams
+  const conversionFactor = UNIT_TO_GRAMS[unit] ?? 1;
+  const grams = amount * conversionFactor;
 
   // Calculate macros based on per 100g values
   const multiplier = grams / 100;

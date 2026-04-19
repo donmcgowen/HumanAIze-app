@@ -1219,7 +1219,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           carbsPer100g: z.number().nonnegative(),
           fatPer100g: z.number().nonnegative(),
           amount: z.number().positive(),
-          unit: z.enum(["g", "oz"]),
+          unit: z.string().min(1),  // g, oz, ml, cup, tbsp, tsp, scoop, slice, piece, egg, serving, fl oz
         })
       )
       .query(({ input }) => {
