@@ -908,11 +908,11 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           const { invokeLLM } = await import("./_core/llm");
           const result = await invokeLLM({
             messages: [{ role: "user", content: prompt }],
-            model: "gemini-2.5-flash",
             response_format: { type: "json_object" },
           });
 
-          const text = result.content || "";
+          const rawContent = result.choices?.[0]?.message?.content ?? "";
+          const text = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
           // Extract JSON array from response
           const match = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
           if (match) {
