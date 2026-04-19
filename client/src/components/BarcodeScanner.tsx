@@ -1,9 +1,17 @@
-import { useEffect, useRef, useState } from "react";
-import jsQR from "jsqr";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { X, Loader2 } from "lucide-react";
+import { X, Loader2, ScanLine } from "lucide-react";
 import { toast } from "sonner";
+
+// Extend Window type for BarcodeDetector
+declare global {
+  interface Window {
+    BarcodeDetector?: new (options?: { formats: string[] }) => {
+      detect(source: HTMLVideoElement | HTMLCanvasElement | ImageBitmap): Promise<Array<{ rawValue: string; format: string }>>;
+    };
+  }
+}
 
 interface BarcodeScannerProps {
   onBarcodeScanned: (barcode: string) => void;
@@ -15,11 +23,26 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detectedBarcode, setDetectedBarcode] = useState<string | null>(null);
+  const [scannerReady, setScannerReady] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanningRef = useRef(false);
   const lastDetectedRef = useRef<string | null>(null);
+  const detectorRef = useRef<InstanceType<NonNullable<typeof window.BarcodeDetector>> | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+
+  const stopCamera = useCallback(() => {
+    scanningRef.current = false;
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -27,15 +50,33 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
     const startCamera = async () => {
       try {
         setError(null);
-        setIsScanning(true);
-        scanningRef.current = true;
+        setIsScanning(false);
+        setScannerReady(false);
         lastDetectedRef.current = null;
+        setDetectedBarcode(null);
+
+        // Initialize BarcodeDetector if available
+        if (window.BarcodeDetector) {
+          try {
+            detectorRef.current = new window.BarcodeDetector({
+              formats: [
+                'ean_13', 'ean_8', 'upc_a', 'upc_e',
+                'code_128', 'code_39', 'code_93',
+                'itf', 'qr_code', 'data_matrix',
+              ],
+            });
+            console.log('[BarcodeScanner] BarcodeDetector initialized');
+          } catch (e) {
+            console.warn('[BarcodeScanner] BarcodeDetector init failed, will use jsQR fallback');
+            detectorRef.current = null;
+          }
+        }
 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
           audio: false,
         });
@@ -44,107 +85,114 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
           videoRef.current.srcObject = stream;
           streamRef.current = stream;
 
-          // Wait for video to be ready, then start detection
-          const checkVideoReady = () => {
-            if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-              console.log("Video ready, starting barcode detection");
-              startBarcodeDetection();
-            } else {
-              setTimeout(checkVideoReady, 100);
-            }
+          videoRef.current.onloadedmetadata = () => {
+            videoRef.current?.play();
           };
-          checkVideoReady();
+
+          videoRef.current.onplaying = () => {
+            setScannerReady(true);
+            setIsScanning(true);
+            scanningRef.current = true;
+            startDetectionLoop();
+          };
         }
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "Failed to access camera";
         setError(errorMsg);
-        setIsScanning(false);
-        scanningRef.current = false;
         console.error("Camera error:", err);
       }
-    };
-
-    const startBarcodeDetection = () => {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-
-      if (!canvas || !video) return;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      console.log("Barcode detection started");
-
-      const detectBarcode = () => {
-        if (!scanningRef.current) return;
-
-        try {
-          // Check if video is ready
-          if (video.videoWidth === 0 || video.videoHeight === 0) {
-            requestAnimationFrame(detectBarcode);
-            return;
-          }
-
-          // Set canvas size to match video
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-
-          // Draw video frame to canvas
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-          // Get image data
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-          // Detect QR codes and 1D barcodes
-          const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-          if (code && code.data) {
-            const barcode = code.data;
-            
-            // Only trigger if different from last detected
-            if (barcode !== lastDetectedRef.current) {
-              console.log("Barcode detected:", barcode);
-              lastDetectedRef.current = barcode;
-              setDetectedBarcode(barcode);
-              onBarcodeScanned(barcode);
-              toast.success(`Barcode detected: ${barcode}`);
-              scanningRef.current = false;
-              setIsScanning(false);
-              return;
-            }
-          }
-        } catch (err) {
-          console.error("Barcode detection error:", err);
-        }
-
-        // Continue scanning
-        if (scanningRef.current) {
-          requestAnimationFrame(detectBarcode);
-        }
-      };
-
-      detectBarcode();
     };
 
     startCamera();
 
     return () => {
-      scanningRef.current = false;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
+      stopCamera();
+    };
+  }, [isOpen, stopCamera]);
+
+  const startDetectionLoop = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const detect = async () => {
+      if (!scanningRef.current) return;
+      if (video.readyState < video.HAVE_ENOUGH_DATA || video.videoWidth === 0) {
+        animFrameRef.current = requestAnimationFrame(detect);
+        return;
+      }
+
+      try {
+        // Use native BarcodeDetector if available (best for EAN-13/UPC)
+        if (detectorRef.current) {
+          const barcodes = await detectorRef.current.detect(video);
+          if (barcodes.length > 0) {
+            const barcode = barcodes[0].rawValue;
+            if (barcode && barcode !== lastDetectedRef.current) {
+              handleBarcodeDetected(barcode);
+              return;
+            }
+          }
+        } else {
+          // Fallback: draw to canvas and use jsQR for QR codes only
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          
+          // Dynamic import jsQR as fallback
+          try {
+            const jsQR = (await import('jsqr')).default;
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code?.data && code.data !== lastDetectedRef.current) {
+              handleBarcodeDetected(code.data);
+              return;
+            }
+          } catch {
+            // jsQR not available
+          }
+        }
+      } catch (err) {
+        // Detection errors are non-fatal, keep scanning
+      }
+
+      if (scanningRef.current) {
+        animFrameRef.current = requestAnimationFrame(detect);
       }
     };
-  }, [isOpen, onBarcodeScanned]);
+
+    animFrameRef.current = requestAnimationFrame(detect);
+  }, []);
+
+  const handleBarcodeDetected = (barcode: string) => {
+    console.log('[BarcodeScanner] Barcode detected:', barcode);
+    lastDetectedRef.current = barcode;
+    setDetectedBarcode(barcode);
+    scanningRef.current = false;
+    setIsScanning(false);
+
+    // Vibrate on mobile if supported
+    if (navigator.vibrate) {
+      navigator.vibrate(200);
+    }
+
+    toast.success(`Barcode scanned: ${barcode}`);
+    onBarcodeScanned(barcode);
+
+    // Close scanner after short delay
+    setTimeout(() => {
+      handleClose();
+    }, 800);
+  };
 
   const handleClose = () => {
-    scanningRef.current = false;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
+    stopCamera();
     setIsOpen(false);
     setIsScanning(false);
+    setScannerReady(false);
     setError(null);
     setDetectedBarcode(null);
     lastDetectedRef.current = null;
@@ -155,35 +203,40 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
     if (!file) return;
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const img = new Image();
-        img.onload = async () => {
-          const canvas = canvasRef.current;
-          if (canvas) {
-            const ctx = canvas.getContext("2d");
-            if (ctx) {
-              canvas.width = img.width;
-              canvas.height = img.height;
-              ctx.drawImage(img, 0, 0);
+      const bitmap = await createImageBitmap(file);
+      
+      if (detectorRef.current) {
+        const barcodes = await detectorRef.current.detect(bitmap);
+        if (barcodes.length > 0) {
+          handleBarcodeDetected(barcodes[0].rawValue);
+          return;
+        }
+      }
 
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const code = jsQR(imageData.data, imageData.width, imageData.height);
-
-              if (code && code.data) {
-                const barcode = code.data;
-                setDetectedBarcode(barcode);
-                onBarcodeScanned(barcode);
-                toast.success(`Barcode detected: ${barcode}`);
-              } else {
-                toast.error("No barcode found in image");
-              }
+      // Fallback to jsQR for QR codes
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          ctx.drawImage(bitmap, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          
+          try {
+            const jsQR = (await import('jsqr')).default;
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code?.data) {
+              handleBarcodeDetected(code.data);
+              return;
             }
+          } catch {
+            // jsQR not available
           }
-        };
-        img.src = e.target?.result as string;
-      };
-      reader.readAsDataURL(file);
+        }
+      }
+
+      toast.error("No barcode found in image. Try a clearer photo.");
     } catch (err) {
       toast.error("Failed to process image");
     }
@@ -193,84 +246,133 @@ export function BarcodeScanner({ onBarcodeScanned, isLoading = false }: BarcodeS
     return (
       <Button
         onClick={() => setIsOpen(true)}
-        disabled={isLoading || isScanning}
+        disabled={isLoading}
         variant="outline"
         className="w-full"
       >
-        {isScanning ? (
+        {isLoading ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Scanning...
+            Looking up product...
           </>
         ) : (
-          "Scan Barcode"
+          <>
+            <ScanLine className="mr-2 h-4 w-4" />
+            Scan Barcode
+          </>
         )}
       </Button>
     );
   }
 
   return (
-    <Card className="border-white/10 bg-white/[0.03] fixed inset-0 z-50 m-4 max-w-md mx-auto my-auto rounded-lg">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+    <Card className="border-white/10 bg-[#0a0f1e] fixed inset-0 z-50 m-4 max-w-md mx-auto my-auto rounded-lg overflow-hidden">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <div>
-          <CardTitle>Scan Barcode</CardTitle>
-          <CardDescription>Point camera at barcode to scan (back camera)</CardDescription>
+          <CardTitle className="text-base">Scan Barcode</CardTitle>
+          <CardDescription className="text-xs">
+            {detectorRef.current
+              ? "Auto-detects EAN-13, UPC-A, QR codes and more"
+              : "Point camera at QR code or barcode"}
+          </CardDescription>
         </div>
-        <button
-          onClick={handleClose}
-          className="text-slate-400 hover:text-white transition"
-        >
+        <button onClick={handleClose} className="text-slate-400 hover:text-white transition">
           <X className="h-5 w-5" />
         </button>
       </CardHeader>
-      <CardContent className="space-y-4">
+
+      <CardContent className="space-y-3 p-4">
         {error ? (
           <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 text-red-200 text-sm">
             <p className="font-medium">Camera Error</p>
             <p className="text-xs mt-1">{error}</p>
             <p className="text-xs mt-2 text-red-300">
-              Make sure you've granted camera permissions in browser settings.
+              Make sure camera permissions are granted in browser settings.
             </p>
           </div>
         ) : (
-          <>
+          <div className="relative rounded-lg overflow-hidden bg-black" style={{ aspectRatio: '4/3' }}>
             <video
               ref={videoRef}
               autoPlay
               playsInline
-              className="w-full bg-black rounded border border-white/20"
-              style={{ minHeight: "300px" }}
+              muted
+              className="w-full h-full object-cover"
             />
-            {isScanning && (
-              <div className="text-center text-sm text-slate-400">
-                {detectedBarcode ? `Detected: ${detectedBarcode}` : "Scanning for barcodes..."}
+
+            {/* Scanning overlay */}
+            {scannerReady && !detectedBarcode && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                {/* Corner brackets */}
+                <div className="relative w-56 h-40">
+                  <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-cyan-400 rounded-tl" />
+                  <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-cyan-400 rounded-tr" />
+                  <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-cyan-400 rounded-bl" />
+                  <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-cyan-400 rounded-br" />
+                  {/* Scanning line animation */}
+                  <div className="absolute inset-x-2 h-0.5 bg-cyan-400/70 animate-scan-line" style={{
+                    animation: 'scanLine 2s ease-in-out infinite',
+                    top: '50%',
+                  }} />
+                </div>
               </div>
             )}
-          </>
+
+            {/* Detected overlay */}
+            {detectedBarcode && (
+              <div className="absolute inset-0 flex items-center justify-center bg-green-900/50">
+                <div className="text-center">
+                  <div className="text-green-400 text-4xl mb-2">✓</div>
+                  <p className="text-white text-sm font-medium">Barcode detected!</p>
+                  <p className="text-green-300 text-xs mt-1">{detectedBarcode}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Loading overlay */}
+            {!scannerReady && !error && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                <div className="text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-cyan-400 mx-auto mb-2" />
+                  <p className="text-white text-sm">Starting camera...</p>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         <canvas ref={canvasRef} className="hidden" />
 
-        <div className="space-y-2">
+        {isScanning && !detectedBarcode && (
+          <p className="text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+            <ScanLine className="h-3 w-3 text-cyan-400 animate-pulse" />
+            Scanning automatically — hold barcode steady in the frame
+          </p>
+        )}
+
+        <div className="space-y-1">
           <label className="block">
-            <span className="text-xs text-slate-400">Or upload barcode image:</span>
+            <span className="text-xs text-slate-400">Or upload a barcode image:</span>
             <input
               type="file"
               accept="image/*"
               onChange={handleFileUpload}
-              className="mt-1 block w-full text-xs"
+              className="mt-1 block w-full text-xs text-slate-400"
             />
           </label>
         </div>
 
-        <p className="text-xs text-slate-400 text-center">
-          Supports QR codes and 1D/2D barcodes
-        </p>
-
-        <Button variant="outline" onClick={handleClose} className="w-full">
-          Close
+        <Button variant="outline" onClick={handleClose} className="w-full text-sm">
+          Cancel
         </Button>
       </CardContent>
+
+      <style>{`
+        @keyframes scanLine {
+          0%, 100% { transform: translateY(-60px); opacity: 0.3; }
+          50% { transform: translateY(60px); opacity: 1; }
+        }
+      `}</style>
     </Card>
   );
 }

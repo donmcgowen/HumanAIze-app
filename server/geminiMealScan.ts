@@ -1,12 +1,12 @@
 /**
- * Gemini 2.5 Flash Food Scanner
+ * AI Food Scanner — uses invokeLLM (OpenAI-compatible endpoint) for vision tasks.
  *
  * Handles two scan modes:
  *  - "product": Reads a nutrition label / product box → returns single food item with per-serving macros
  *  - "meal":    Analyzes a plate of food → returns multiple food items with individual macros
  */
 
-import { ENV } from "./_core/env";
+import { invokeLLM } from "./_core/llm";
 
 export interface MealFoodItem {
   name: string;
@@ -39,7 +39,7 @@ Extract the following from the visible nutrition label or product packaging:
 3. Per-serving macros: Calories, Protein (g), Total Carbohydrates (g), Total Fat (g), Total Sugars (g)
 
 If you see a full nutrition facts panel, read the exact values.
-If you only see the front of the package, estimate based on typical values for that product type.
+If you only see the front of the package, use the values shown (e.g. "10g protein per serving" means protein=10).
 
 Return ONLY valid JSON with no markdown fences:
 {
@@ -83,50 +83,37 @@ Return ONLY valid JSON with no markdown fences:
 
 Be realistic with portion sizes. Always return valid JSON.`;
 
-async function callGeminiVision(
+async function callVisionLLM(
   imageBase64: string,
   mimeType: string,
   prompt: string
 ): Promise<any> {
-  const geminiKey = ENV.geminiApiKey;
-  if (!geminiKey) {
-    throw new Error("GEMINI_API_KEY is not configured on the server.");
-  }
+  const dataUrl = `data:${mimeType};base64,${imageBase64}`;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
-
-  const payload = {
-    contents: [{
-      parts: [
-        { text: prompt },
-        { inline_data: { mime_type: mimeType, data: imageBase64 } }
-      ]
-    }],
-    generationConfig: {
-      temperature: 0.1,
-      maxOutputTokens: 1024,
-    }
-  };
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+  const result = await invokeLLM({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
+        ],
+      },
+    ],
   });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errText.substring(0, 300)}`);
-  }
+  const responseText: string =
+    result?.choices?.[0]?.message?.content ?? "";
 
-  const data = await response.json() as any;
-  const responseText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  if (!responseText) throw new Error("No response from vision LLM.");
 
-  if (!responseText) throw new Error("No response from Gemini vision API.");
+  const cleaned = responseText
+    .replace(/```json\s*/gi, "")
+    .replace(/```\s*/gi, "")
+    .trim();
 
-  const cleaned = responseText.replace(/```json\s*/gi, "").replace(/```\s*/gi, "").trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Could not parse Gemini response as JSON.");
+  if (!jsonMatch) throw new Error("Could not parse LLM response as JSON.");
 
   return JSON.parse(jsonMatch[0]);
 }
@@ -139,7 +126,7 @@ export async function scanProductLabel(
   imageBase64: string,
   mimeType: string = "image/jpeg"
 ): Promise<MealScanResult> {
-  const parsed = await callGeminiVision(imageBase64, mimeType, PRODUCT_PROMPT);
+  const parsed = await callVisionLLM(imageBase64, mimeType, PRODUCT_PROMPT);
 
   const item: MealFoodItem = {
     name: String(parsed.productName ?? "Scanned Product"),
@@ -172,7 +159,7 @@ export async function analyzeMealPhotoWithGemini(
   imageBase64: string,
   mimeType: string = "image/jpeg"
 ): Promise<MealScanResult> {
-  const parsed = await callGeminiVision(imageBase64, mimeType, MEAL_PROMPT);
+  const parsed = await callVisionLLM(imageBase64, mimeType, MEAL_PROMPT);
 
   const items: MealFoodItem[] = (parsed.items ?? []).map((item: any) => ({
     name: String(item.name ?? "Unknown food"),
