@@ -42,7 +42,7 @@ function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCi
 export default function Dashboard() {
   const { data: dashboard } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
-  const { data: weightEntries = [] } = trpc.weight.getEntries.useQuery({ days: 365 });
+  const { data: weightEntries = [] } = trpc.weight.getEntries.useQuery({ days: 90 });
   const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
@@ -195,9 +195,9 @@ export default function Dashboard() {
 
       {/* Weight Summary */}
       {weightEntries.length > 0 && (() => {
-        const sorted = [...(weightEntries as any[])].sort((a, b) => a.date - b.date);
-        const startWeight = sorted[0]?.weight ?? 0;
-        const currentWeight = sorted[sorted.length - 1]?.weight ?? 0;
+        const entries = weightEntries as any[];
+        const currentWeight = entries[0]?.weightLbs ?? 0;
+        const startWeight = entries[entries.length - 1]?.weightLbs ?? 0;
         const weightLoss = startWeight - currentWeight;
         const isLoss = weightLoss > 0;
         return (

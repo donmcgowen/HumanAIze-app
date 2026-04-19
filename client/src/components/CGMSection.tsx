@@ -199,20 +199,6 @@ export function CGMSection() {
         </Card>
       ) : stats ? (
         <>
-          {/* Single Metric Box: Avg Glucose only (A1C and TIR shown on Monitoring page) */}
-          <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-            <Card className="border border-white/10 bg-gradient-to-br from-cyan-950/50 to-slate-950">
-              <CardContent className="pt-6 pb-4">
-                <p className="text-slate-400 text-sm mb-1">Avg Glucose (30d)</p>
-                <p className="text-3xl font-bold text-cyan-400">{stats.average}</p>
-                <p className="text-slate-500 text-xs mt-1">mg/dL</p>
-                <div className="mt-3 text-xs text-slate-400">
-                  Range: {stats.min} – {stats.max} mg/dL
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
           {/* 7-Day Chart */}
           <Card className="border border-white/10 bg-slate-950">
             <CardHeader>
