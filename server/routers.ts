@@ -920,7 +920,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
               contents: [{ role: "user", parts: [{ text: prompt }] }],
               generationConfig: {
                 temperature: 0.2,
-                maxOutputTokens: 2048,
+                maxOutputTokens: 8192,
                 responseMimeType: "application/json",
               },
             }),
