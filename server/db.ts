@@ -199,6 +199,12 @@ BEGIN
     [cgmAverageGlucose] INT NULL,
     [cgmTimeInRange] FLOAT NULL,
     [cgmA1cEstimate] FLOAT NULL,
+    [activityLevel] NVARCHAR(32) NULL DEFAULT 'moderately_active',
+    [diabetesType] NVARCHAR(32) NULL,
+    [gender] NVARCHAR(16) NULL,
+    [onboardingCompleted] BIT NULL DEFAULT 0,
+    [geminiPlan] NVARCHAR(MAX) NULL,
+    [healthConditions] NVARCHAR(MAX) NULL,
     [createdAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     [updatedAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
   );
@@ -224,6 +230,18 @@ IF COL_LENGTH('dbo.user_profiles', 'cgmTimeInRange') IS NULL
   ALTER TABLE [dbo].[user_profiles] ADD [cgmTimeInRange] FLOAT NULL;
 IF COL_LENGTH('dbo.user_profiles', 'cgmA1cEstimate') IS NULL
   ALTER TABLE [dbo].[user_profiles] ADD [cgmA1cEstimate] FLOAT NULL;
+IF COL_LENGTH('dbo.user_profiles', 'activityLevel') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [activityLevel] NVARCHAR(32) NULL DEFAULT 'moderately_active';
+IF COL_LENGTH('dbo.user_profiles', 'diabetesType') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [diabetesType] NVARCHAR(32) NULL;
+IF COL_LENGTH('dbo.user_profiles', 'gender') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [gender] NVARCHAR(16) NULL;
+IF COL_LENGTH('dbo.user_profiles', 'onboardingCompleted') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [onboardingCompleted] BIT NULL DEFAULT 0;
+IF COL_LENGTH('dbo.user_profiles', 'geminiPlan') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [geminiPlan] NVARCHAR(MAX) NULL;
+IF COL_LENGTH('dbo.user_profiles', 'healthConditions') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [healthConditions] NVARCHAR(MAX) NULL;
       `);
 
       const result = await pool
@@ -248,6 +266,10 @@ SELECT TOP 1
   [cgmA1cEstimate],
   [activityLevel],
   [diabetesType],
+  [gender],
+  [onboardingCompleted],
+  [geminiPlan],
+  [healthConditions],
   [createdAt],
   [updatedAt]
 FROM [dbo].[user_profiles]
@@ -275,6 +297,10 @@ WHERE [userId] = @userId
         cgmA1cEstimate: row.cgmA1cEstimate,
         activityLevel: row.activityLevel ?? "moderately_active",
         diabetesType: row.diabetesType ?? null,
+        gender: row.gender ?? null,
+        onboardingCompleted: row.onboardingCompleted === true || row.onboardingCompleted === 1,
+        geminiPlan: row.geminiPlan ?? null,
+        healthConditions: row.healthConditions ?? null,
         createdAt: row.createdAt ? new Date(row.createdAt) : new Date(),
         updatedAt: row.updatedAt ? new Date(row.updatedAt) : new Date(),
       } as UserProfile;
@@ -387,6 +413,10 @@ BEGIN
     [cgmA1cEstimate] FLOAT NULL,
     [activityLevel] NVARCHAR(32) NULL DEFAULT 'moderately_active',
     [diabetesType] NVARCHAR(32) NULL,
+    [gender] NVARCHAR(16) NULL,
+    [onboardingCompleted] BIT NULL DEFAULT 0,
+    [geminiPlan] NVARCHAR(MAX) NULL,
+    [healthConditions] NVARCHAR(MAX) NULL,
     [createdAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
     [updatedAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
   );
@@ -416,6 +446,14 @@ IF COL_LENGTH('dbo.user_profiles', 'activityLevel') IS NULL
   ALTER TABLE [dbo].[user_profiles] ADD [activityLevel] NVARCHAR(32) NULL DEFAULT 'moderately_active';
 IF COL_LENGTH('dbo.user_profiles', 'diabetesType') IS NULL
   ALTER TABLE [dbo].[user_profiles] ADD [diabetesType] NVARCHAR(32) NULL;
+IF COL_LENGTH('dbo.user_profiles', 'gender') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [gender] NVARCHAR(16) NULL;
+IF COL_LENGTH('dbo.user_profiles', 'onboardingCompleted') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [onboardingCompleted] BIT NULL DEFAULT 0;
+IF COL_LENGTH('dbo.user_profiles', 'geminiPlan') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [geminiPlan] NVARCHAR(MAX) NULL;
+IF COL_LENGTH('dbo.user_profiles', 'healthConditions') IS NULL
+  ALTER TABLE [dbo].[user_profiles] ADD [healthConditions] NVARCHAR(MAX) NULL;
       `);
 
       const existsResult = await pool

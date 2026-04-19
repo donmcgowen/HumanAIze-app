@@ -7,11 +7,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 import { ProgressPhotos } from "@/components/ProgressPhotos";
+import { OnboardingWizard } from "@/components/OnboardingWizard";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { calculateMacros, getActivityLevelLabel, type ActivityLevel, type MacroSuggestion } from "../../../shared/macroCalculator";
 
 export function Profile() {
+  const [showWizard, setShowWizard] = useState(false);
   const utils = trpc.useUtils();
   const { data: profile, isLoading: isLoadingProfile, refetch } = trpc.profile.get.useQuery();
   const updateProfile = trpc.profile.upsert.useMutation();
@@ -240,6 +242,7 @@ export function Profile() {
   }
 
   return (
+    <>
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">User Profile</h1>
@@ -495,6 +498,31 @@ export function Profile() {
         </CardContent>
       </Card>
 
+      {/* Build Profile with AI Wizard */}
+      <Card className="bg-gradient-to-br from-purple-900/30 to-cyan-900/30 border-purple-500/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-white">
+            <Sparkles className="h-5 w-5 text-cyan-400" />
+            Build Profile with AI
+          </CardTitle>
+          <CardDescription className="text-slate-400">
+            Let Gemini AI analyze your goals, health conditions, and biometrics to create a personalized nutrition and workout plan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            onClick={() => setShowWizard(true)}
+            className="w-full bg-gradient-to-r from-cyan-600 to-purple-600 hover:from-cyan-500 hover:to-purple-500 text-white font-semibold"
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            Launch Profile Builder Wizard
+          </Button>
+          <p className="text-xs text-slate-500 mt-2 text-center">
+            Re-run the onboarding wizard to update your AI-generated plan
+          </p>
+        </CardContent>
+      </Card>
+
       {/* Progress Photos */}
       <ProgressPhotos />
 
@@ -514,5 +542,18 @@ export function Profile() {
         )}
       </Button>
     </div>
+
+    {/* Onboarding Wizard re-run */}
+    {showWizard && (
+      <OnboardingWizard
+        onComplete={() => {
+          setShowWizard(false);
+          utils.profile.get.invalidate();
+          toast.success("Profile updated with your new AI plan!");
+        }}
+        onSkip={() => setShowWizard(false)}
+      />
+    )}
+    </>
   );
 }

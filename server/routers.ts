@@ -511,12 +511,183 @@ export const appRouter = router({
           dailyProteinTarget: z.number().int().positive().optional(),
           dailyCarbsTarget: z.number().int().positive().optional(),
           dailyFatTarget: z.number().int().positive().optional(),
+          gender: z.enum(["male", "female", "other"]).optional(),
+          onboardingCompleted: z.boolean().optional(),
+          geminiPlan: z.string().optional(),
+          healthConditions: z.string().optional(),
         })
       )
       .mutation(({ ctx, input }) => {
         const userId = Number(ctx.user.id);
         if (!Number.isFinite(userId)) throw new TRPCError({ code: "UNAUTHORIZED" });
-        return upsertUserProfile(userId, input);
+        return upsertUserProfile(userId, input as any);
+      }),
+    generateAIPlan: protectedProcedure
+      .input(
+        z.object({
+          gender: z.string(),
+          ageYears: z.number(),
+          weightLbs: z.number(),
+          heightIn: z.number(),
+          goalWeightLbs: z.number().optional(),
+          goalDate: z.number().optional(),
+          fitnessGoal: z.string(),
+          activityLevel: z.string(),
+          healthConditions: z.string().optional(),
+          dailyCalorieTarget: z.number().optional(),
+          dailyProteinTarget: z.number().optional(),
+          dailyCarbsTarget: z.number().optional(),
+          dailyFatTarget: z.number().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const heightFt = Math.floor(input.heightIn / 12);
+        const heightInRem = input.heightIn % 12;
+        const bmi = ((input.weightLbs / (input.heightIn * input.heightIn)) * 703).toFixed(1);
+        const goalDateStr = input.goalDate ? new Date(input.goalDate).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "no specific date";
+        const weightDiff = input.goalWeightLbs ? input.goalWeightLbs - input.weightLbs : 0;
+        const goalDesc = input.fitnessGoal === "lose_fat" ? "lose body fat" : input.fitnessGoal === "build_muscle" ? "build muscle" : "maintain weight";
+        const healthNote = input.healthConditions && input.healthConditions !== "none" ? `Health conditions: ${input.healthConditions}` : "No significant health conditions";
+
+        const prompt = `You are a certified personal trainer and registered dietitian. Create a comprehensive, personalized health plan for this user.
+
+User Profile:
+- Gender: ${input.gender}
+- Age: ${input.ageYears} years old
+- Height: ${heightFt}'${heightInRem}"
+- Current weight: ${input.weightLbs} lbs
+- Goal weight: ${input.goalWeightLbs ? input.goalWeightLbs + " lbs" : "not specified"}
+- Goal: ${goalDesc}
+- Target date: ${goalDateStr}
+- Weight change needed: ${weightDiff > 0 ? "+" : ""}${weightDiff} lbs
+- Activity level: ${input.activityLevel.replace(/_/g, " ")}
+- BMI: ${bmi}
+- ${healthNote}
+- Daily targets: ${input.dailyCalorieTarget || "auto"} cal, ${input.dailyProteinTarget || "auto"}g protein, ${input.dailyCarbsTarget || "auto"}g carbs, ${input.dailyFatTarget || "auto"}g fat
+
+Provide a detailed, personalized plan in this EXACT JSON format:
+{
+  "summary": "2-3 sentence overview of their situation and approach",
+  "nutritionPlan": {
+    "dailyCalories": number,
+    "protein": number,
+    "carbs": number,
+    "fat": number,
+    "keyPrinciples": ["principle 1", "principle 2", "principle 3"],
+    "mealTiming": "advice on meal timing",
+    "foodsToEat": ["food 1", "food 2", "food 3", "food 4", "food 5"],
+    "foodsToAvoid": ["food 1", "food 2", "food 3"]
+  },
+  "workoutPlan": {
+    "type": "e.g. Upper/Lower Split, Full Body, Cardio-focused",
+    "daysPerWeek": number,
+    "sessionDuration": "e.g. 45-60 minutes",
+    "cardio": "specific cardio recommendation",
+    "strength": "specific strength recommendation appropriate for age/health",
+    "weeklySchedule": ["Day 1: ...", "Day 2: ...", "Day 3: ...", "Day 4: ...", "Day 5: ...", "Day 6: ...", "Day 7: ..."]
+  },
+  "healthTips": ["tip 1", "tip 2", "tip 3"],
+  "timeline": "realistic timeline and milestones"
+}
+
+IMPORTANT: Be specific to their age, health conditions, and goals. Do NOT suggest heavy weight training for elderly users. For diabetics, emphasize blood sugar management. For muscle building in young males, suggest progressive overload. Always be safe and realistic.`;
+
+        try {
+          const geminiKey = ENV.geminiApiKey;
+          if (!geminiKey) throw new Error("Gemini API key not configured");
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                  temperature: 0.7,
+                  maxOutputTokens: 8192,
+                  responseMimeType: "application/json",
+                },
+              }),
+            }
+          );
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Gemini API error: ${response.status} ${errText}`);
+          }
+
+          const data = await response.json();
+          const parts = data?.candidates?.[0]?.content?.parts ?? [];
+          const text = parts.map((p: any) => p.text ?? "").join("");
+
+          // Parse the JSON plan
+          let plan: any;
+          try {
+            plan = JSON.parse(text);
+          } catch {
+            const match = text.match(/\{[\s\S]*\}/);
+            if (match) plan = JSON.parse(match[0]);
+            else throw new Error("Could not parse Gemini plan as JSON");
+          }
+
+          return { success: true, plan };
+        } catch (error: any) {
+          console.error("[generateAIPlan] Error:", error?.message);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error?.message ?? "Failed to generate plan" });
+        }
+      }),
+    askAssistant: protectedProcedure
+      .input(
+        z.object({
+          message: z.string().min(1).max(2000),
+          context: z.string().optional(), // page context (food-logging, workouts, etc.)
+          profileSummary: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        try {
+          const geminiKey = ENV.geminiApiKey;
+          if (!geminiKey) throw new Error("Gemini API key not configured");
+
+          const systemContext = `You are HumanAIze AI, a personal health and fitness assistant embedded in the HumanAIze health tracking app. You are knowledgeable about nutrition, fitness, weight management, and general wellness. You have access to the user's profile and health data.
+
+${input.profileSummary ? `User Profile:\n${input.profileSummary}` : ""}
+${input.context ? `Current page: ${input.context}` : ""}
+
+Be concise, friendly, and actionable. Format responses with bullet points or short paragraphs. Always personalize advice based on the user's profile data when available.`;
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [
+                  { role: "user", parts: [{ text: systemContext + "\n\nUser question: " + input.message }] },
+                ],
+                generationConfig: {
+                  temperature: 0.8,
+                  maxOutputTokens: 2048,
+                },
+              }),
+            }
+          );
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Gemini API error: ${response.status} ${errText}`);
+          }
+
+          const data = await response.json();
+          const parts = data?.candidates?.[0]?.content?.parts ?? [];
+          const text = parts.map((p: any) => p.text ?? "").join("");
+
+          return { success: true, reply: text };
+        } catch (error: any) {
+          console.error("[askAssistant] Error:", error?.message);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: error?.message ?? "Failed to get AI response" });
+        }
       }),
   }),
   food: router({

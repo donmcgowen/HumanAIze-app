@@ -33,6 +33,8 @@ import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
+import { OnboardingWizard } from "./OnboardingWizard";
+import { AIAssistant } from "./AIAssistant";
 import { toast } from "sonner";
 
 // Set MVP_ONLY to true to show only the 4 core MVP screens
@@ -103,6 +105,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 function DashboardLayoutContent({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const utils = trpc.useUtils();
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const profileQuery = trpc.profile.get.useQuery(undefined, { staleTime: 60_000 });
+  const profile = profileQuery.data;
+
+  // Show onboarding wizard if profile not yet completed
+  useEffect(() => {
+    if (profile !== undefined && !profile?.onboardingCompleted) {
+      setShowOnboarding(true);
+    }
+  }, [profile]);
   const updateEmailMutation = trpc.auth.updateEmail.useMutation();
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [emailDraft, setEmailDraft] = useState(user?.email ?? "");
@@ -410,6 +422,20 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
       <main className="min-h-[calc(100vh-4rem)] w-full overflow-x-auto p-4 md:p-6">
         {children}
       </main>
+
+      {/* ── Onboarding Wizard (first login) ── */}
+      {showOnboarding && (
+        <OnboardingWizard
+          onComplete={() => {
+            setShowOnboarding(false);
+            utils.profile.get.invalidate();
+          }}
+          onSkip={() => setShowOnboarding(false)}
+        />
+      )}
+
+      {/* ── Persistent AI Assistant ── */}
+      <AIAssistant profile={profile} />
     </div>
   );
 }
