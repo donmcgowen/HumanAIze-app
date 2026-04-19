@@ -860,14 +860,15 @@ export const appRouter = router({
           await clearLocalCachedFood(normalizedQuery);
         }
 
-        // 2. Check DB cache if available (skip for branded queries since DB may have stale generic results)
+        // 2. Check DB cache if available — apply relevance quality check to prevent stale results
         const dbCached = await getCachedFoodSearchResults(normalizedQuery);
         if (dbCached.length > 0) {
-          // Only use DB cache if results look like branded products (have real brand names)
-          const hasBrandedResults = dbCached.some(c => 
-            c.description && !c.description.includes("SR Legacy") && !c.description.includes("Survey (FNDDS)")
-          );
-          if (hasBrandedResults || dbCached.length >= 5) {
+          const dbQueryWords = normalizedQuery.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+          const dbHasRelevantResult = dbCached.some(c => {
+            const nameLower = (c.foodName || "").toLowerCase();
+            return dbQueryWords.some(w => nameLower.includes(w));
+          });
+          if (dbHasRelevantResult) {
             console.log(`[Food Search] DB cache hit for query: "${normalizedQuery}" (${dbCached.length} results)`);
             const mapped = dbCached.map(c => ({
               name: c.foodName,
@@ -881,6 +882,7 @@ export const appRouter = router({
             await saveLocalCachedFood(normalizedQuery, mapped, "branded");
             return mapped;
           }
+          console.log(`[Food Search] DB cache quality check failed for "${normalizedQuery}" — bypassing stale cache`);
         }
 
         // 3. Cache miss — search USDA Branded + Open Food Facts IN PARALLEL (best sources for branded products)
