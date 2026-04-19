@@ -30,5 +30,8 @@ export const ENV = {
     process.env.OPENFOODFACTS_USER_AGENT ?? "HumanAIze/1.0 (support@humanaize.life)",
   openFoodFactsStagingUsername: process.env.OPENFOODFACTS_STAGING_USERNAME ?? "off",
   openFoodFactsStagingPassword: process.env.OPENFOODFACTS_STAGING_PASSWORD ?? "off",
+
+  // Email (Resend)
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
 };
 
