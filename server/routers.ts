@@ -905,13 +905,33 @@ Respond with a JSON array of exactly 3 meal suggestions. Each suggestion must ha
 Focus on meals that fill the remaining macro gaps. If glucose is high, suggest lower-carb options. If protein is low, prioritize high-protein meals. Be specific with real food names.`;
 
         try {
-          const { invokeLLM } = await import("./_core/llm");
-          const result = await invokeLLM({
-            messages: [{ role: "user", content: prompt }],
-            response_format: { type: "json_object" },
+          // Call Gemini directly — avoids forge API IP restrictions
+          const { ENV } = await import("./_core/env");
+          if (!ENV.geminiApiKey) {
+            console.warn("[AI Meal Suggestions] No GEMINI_API_KEY configured");
+            return [];
+          }
+          const GEMINI_MODEL = "gemini-2.5-flash";
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${ENV.geminiApiKey}`;
+          const geminiRes = await fetch(geminiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.2,
+                maxOutputTokens: 2048,
+                responseMimeType: "application/json",
+              },
+            }),
           });
-
-          const rawContent = result.choices?.[0]?.message?.content ?? "";
+          if (!geminiRes.ok) {
+            const errText = await geminiRes.text();
+            console.error("[AI Meal Suggestions] Gemini API error:", geminiRes.status, errText.slice(0, 300));
+            return [];
+          }
+          const geminiData = await geminiRes.json() as any;
+          const rawContent = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
           const text = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent);
           console.log("[AI Meal Suggestions] Raw response (first 500 chars):", text.slice(0, 500));
 

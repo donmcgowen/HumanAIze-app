@@ -823,23 +823,44 @@ WHERE [id] = @foodLogId
 export async function addFavoriteFood(userId: number, food: Omit<InsertFavoriteFood, "userId">): Promise<FavoriteFood> {
   const db = await getDb();
   if (!db) {
-    throw new Error("Database is not available");
+    if (!ENV.azureSqlConnectionString) throw new Error("Database is not available");
+    const pool = await getAzureSqlPool();
+    await pool.request().query(`
+      IF OBJECT_ID(N'dbo.favorite_foods', N'U') IS NULL
+      BEGIN
+        CREATE TABLE [dbo].[favorite_foods] (
+          [id] INT IDENTITY(1,1) PRIMARY KEY,
+          [userId] INT NOT NULL,
+          [foodName] NVARCHAR(191) NOT NULL,
+          [servingSize] NVARCHAR(120) NOT NULL DEFAULT '1 serving',
+          [calories] INT NOT NULL,
+          [proteinGrams] FLOAT NOT NULL,
+          [carbsGrams] FLOAT NOT NULL,
+          [fatGrams] FLOAT NOT NULL,
+          [source] NVARCHAR(32) NOT NULL DEFAULT 'manual',
+          [createdAt] DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+        );
+      END
+    `);
+    await pool.request()
+      .input("userId", userId)
+      .input("foodName", food.foodName)
+      .input("servingSize", food.servingSize ?? "1 serving")
+      .input("calories", food.calories)
+      .input("proteinGrams", food.proteinGrams)
+      .input("carbsGrams", food.carbsGrams)
+      .input("fatGrams", food.fatGrams)
+      .input("source", food.source ?? "manual")
+      .query(`INSERT INTO [dbo].[favorite_foods] ([userId],[foodName],[servingSize],[calories],[proteinGrams],[carbsGrams],[fatGrams],[source]) VALUES (@userId,@foodName,@servingSize,@calories,@proteinGrams,@carbsGrams,@fatGrams,@source)`);
+    const r = await pool.request().input("userId", userId).query<any>(`SELECT TOP 1 * FROM [dbo].[favorite_foods] WHERE [userId]=@userId ORDER BY [id] DESC`);
+    if (!r.recordset?.[0]) throw new Error("Failed to create favorite food");
+    const row = r.recordset[0];
+    return { ...row, createdAt: new Date(row.createdAt) } as any;
   }
 
-  const newFood: InsertFavoriteFood = {
-    userId,
-    ...food,
-  };
-
+  const newFood: InsertFavoriteFood = { userId, ...food };
   await db.insert(favoriteFoods).values(newFood);
-
-  const created = await db
-    .select()
-    .from(favoriteFoods)
-    .where(eq(favoriteFoods.userId, userId))
-    .orderBy((t) => desc(t.createdAt))
-    .limit(1);
-
+  const created = await db.select().from(favoriteFoods).where(eq(favoriteFoods.userId, userId)).orderBy((t) => desc(t.createdAt)).limit(1);
   if (!created || created.length === 0) throw new Error("Failed to create favorite food");
   return created[0];
 }
@@ -847,28 +868,91 @@ export async function addFavoriteFood(userId: number, food: Omit<InsertFavoriteF
 export async function getFavoriteFoods(userId: number): Promise<FavoriteFood[]> {
   const db = await getDb();
   if (!db) {
-    console.warn("[Database] Cannot get favorite foods: database not available");
-    return [];
+    if (!ENV.azureSqlConnectionString) return [];
+    try {
+      const pool = await getAzureSqlPool();
+      const r = await pool.request().input("userId", userId).query<any>(`
+        IF OBJECT_ID(N'dbo.favorite_foods', N'U') IS NOT NULL
+          SELECT * FROM [dbo].[favorite_foods] WHERE [userId]=@userId ORDER BY [id] DESC
+        ELSE
+          SELECT TOP 0 * FROM (SELECT 1 AS id) t
+      `);
+      return (r.recordset || []).map((row: any) => ({ ...row, createdAt: new Date(row.createdAt) })) as any[];
+    } catch { return []; }
   }
-
   return db.select().from(favoriteFoods).where(eq(favoriteFoods.userId, userId)).orderBy((t) => desc(t.createdAt));
 }
 
 export async function deleteFavoriteFood(favoriteFoodId: number, userId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) {
-    throw new Error("Database is not available");
+    if (!ENV.azureSqlConnectionString) throw new Error("Database is not available");
+    const pool = await getAzureSqlPool();
+    await pool.request().input("id", favoriteFoodId).input("userId", userId)
+      .query(`DELETE FROM [dbo].[favorite_foods] WHERE [id]=@id AND [userId]=@userId`);
+    return true;
   }
-
   await db.delete(favoriteFoods).where(and(eq(favoriteFoods.id, favoriteFoodId), eq(favoriteFoods.userId, userId)));
   return true;
+}
+
+// ── Meal Templates Azure SQL helper ──────────────────────────────────────────
+const ENSURE_MEAL_TEMPLATES_TABLE = `
+  IF OBJECT_ID(N'dbo.meal_templates', N'U') IS NULL
+  BEGIN
+    CREATE TABLE [dbo].[meal_templates] (
+      [id]                INT IDENTITY(1,1) PRIMARY KEY,
+      [userId]            INT NOT NULL,
+      [mealName]          NVARCHAR(191) NOT NULL,
+      [mealType]          NVARCHAR(32) NOT NULL DEFAULT 'other',
+      [foods]             NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+      [totalCalories]     INT NOT NULL DEFAULT 0,
+      [totalProteinGrams] FLOAT NOT NULL DEFAULT 0,
+      [totalCarbsGrams]   FLOAT NOT NULL DEFAULT 0,
+      [totalFatGrams]     FLOAT NOT NULL DEFAULT 0,
+      [notes]             NVARCHAR(MAX) NULL,
+      [createdAt]         DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      [updatedAt]         DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX [idx_meal_templates_userId] ON [dbo].[meal_templates] ([userId]);
+  END
+`;
+
+function rowToMealTemplate(row: any): MealTemplate {
+  let foods: any = row.foods;
+  if (typeof foods === "string") {
+    try { foods = JSON.parse(foods); } catch { foods = []; }
+  }
+  return {
+    ...row,
+    foods,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  } as any;
 }
 
 // Meal Templates Functions
 export async function createMealTemplate(userId: number, meal: Omit<InsertMealTemplate, 'userId'>): Promise<MealTemplate> {
   const db = await getDb();
   if (!db) {
-    throw new Error("Database is not available");
+    if (!ENV.azureSqlConnectionString) throw new Error("Database is not available");
+    const pool = await getAzureSqlPool();
+    await pool.request().query(ENSURE_MEAL_TEMPLATES_TABLE);
+    await pool.request()
+      .input("userId", userId)
+      .input("mealName", meal.mealName)
+      .input("mealType", meal.mealType || "other")
+      .input("foods", JSON.stringify(meal.foods ?? []))
+      .input("totalCalories", meal.totalCalories)
+      .input("totalProteinGrams", meal.totalProteinGrams)
+      .input("totalCarbsGrams", meal.totalCarbsGrams)
+      .input("totalFatGrams", meal.totalFatGrams)
+      .input("notes", meal.notes ?? null)
+      .query(`INSERT INTO [dbo].[meal_templates] ([userId],[mealName],[mealType],[foods],[totalCalories],[totalProteinGrams],[totalCarbsGrams],[totalFatGrams],[notes]) VALUES (@userId,@mealName,@mealType,@foods,@totalCalories,@totalProteinGrams,@totalCarbsGrams,@totalFatGrams,@notes)`);
+    const r = await pool.request().input("userId", userId)
+      .query<any>(`SELECT TOP 1 * FROM [dbo].[meal_templates] WHERE [userId]=@userId ORDER BY [id] DESC`);
+    if (!r.recordset?.[0]) throw new Error("Failed to create meal template");
+    return rowToMealTemplate(r.recordset[0]);
   }
 
   const newMeal: InsertMealTemplate = {
@@ -882,9 +966,7 @@ export async function createMealTemplate(userId: number, meal: Omit<InsertMealTe
     totalFatGrams: meal.totalFatGrams,
     notes: meal.notes,
   };
-
-  const result = await db.insert(mealTemplates).values(newMeal);
-  
+  await db.insert(mealTemplates).values(newMeal);
   const created = await db.select().from(mealTemplates).where(eq(mealTemplates.userId, userId)).orderBy((t) => desc(t.createdAt)).limit(1);
   if (!created || created.length === 0) throw new Error("Failed to create meal template");
   return created[0];
@@ -893,19 +975,27 @@ export async function createMealTemplate(userId: number, meal: Omit<InsertMealTe
 export async function getMealTemplates(userId: number): Promise<MealTemplate[]> {
   const db = await getDb();
   if (!db) {
-    console.warn("[Database] Cannot get meal templates: database not available");
-    return [];
+    if (!ENV.azureSqlConnectionString) return [];
+    try {
+      const pool = await getAzureSqlPool();
+      await pool.request().query(ENSURE_MEAL_TEMPLATES_TABLE);
+      const r = await pool.request().input("userId", userId)
+        .query<any>(`SELECT * FROM [dbo].[meal_templates] WHERE [userId]=@userId ORDER BY [id] DESC`);
+      return (r.recordset || []).map(rowToMealTemplate);
+    } catch { return []; }
   }
-
   return db.select().from(mealTemplates).where(eq(mealTemplates.userId, userId)).orderBy((t) => desc(t.createdAt));
 }
 
 export async function getMealTemplate(mealTemplateId: number, userId: number): Promise<MealTemplate | null> {
   const db = await getDb();
   if (!db) {
-    throw new Error("Database is not available");
+    if (!ENV.azureSqlConnectionString) return null;
+    const pool = await getAzureSqlPool();
+    const r = await pool.request().input("id", mealTemplateId).input("userId", userId)
+      .query<any>(`SELECT TOP 1 * FROM [dbo].[meal_templates] WHERE [id]=@id AND [userId]=@userId`);
+    return r.recordset?.[0] ? rowToMealTemplate(r.recordset[0]) : null;
   }
-
   const result = await db.select().from(mealTemplates).where(and(eq(mealTemplates.id, mealTemplateId), eq(mealTemplates.userId, userId))).limit(1);
   return result.length > 0 ? result[0] : null;
 }
@@ -917,14 +1007,27 @@ export async function updateMealTemplate(
 ): Promise<MealTemplate> {
   const db = await getDb();
   if (!db) {
-    throw new Error("Database is not available");
+    if (!ENV.azureSqlConnectionString) throw new Error("Database is not available");
+    const pool = await getAzureSqlPool();
+    const setClauses: string[] = [];
+    const req = pool.request().input("id", mealTemplateId).input("userId", userId);
+    if (updates.mealName !== undefined) { setClauses.push("[mealName]=@mealName"); req.input("mealName", updates.mealName); }
+    if (updates.mealType !== undefined) { setClauses.push("[mealType]=@mealType"); req.input("mealType", updates.mealType); }
+    if (updates.foods !== undefined) { setClauses.push("[foods]=@foods"); req.input("foods", JSON.stringify(updates.foods)); }
+    if (updates.totalCalories !== undefined) { setClauses.push("[totalCalories]=@totalCalories"); req.input("totalCalories", updates.totalCalories); }
+    if (updates.totalProteinGrams !== undefined) { setClauses.push("[totalProteinGrams]=@totalProteinGrams"); req.input("totalProteinGrams", updates.totalProteinGrams); }
+    if (updates.totalCarbsGrams !== undefined) { setClauses.push("[totalCarbsGrams]=@totalCarbsGrams"); req.input("totalCarbsGrams", updates.totalCarbsGrams); }
+    if (updates.totalFatGrams !== undefined) { setClauses.push("[totalFatGrams]=@totalFatGrams"); req.input("totalFatGrams", updates.totalFatGrams); }
+    if (updates.notes !== undefined) { setClauses.push("[notes]=@notes"); req.input("notes", updates.notes); }
+    if (setClauses.length > 0) {
+      await req.query(`UPDATE [dbo].[meal_templates] SET ${setClauses.join(",")},[updatedAt]=SYSUTCDATETIME() WHERE [id]=@id AND [userId]=@userId`);
+    }
+    const r2 = await pool.request().input("id", mealTemplateId).input("userId", userId)
+      .query<any>(`SELECT TOP 1 * FROM [dbo].[meal_templates] WHERE [id]=@id AND [userId]=@userId`);
+    if (!r2.recordset?.[0]) throw new Error("Failed to update meal template");
+    return rowToMealTemplate(r2.recordset[0]);
   }
-
-  await db
-    .update(mealTemplates)
-    .set(updates)
-    .where(and(eq(mealTemplates.id, mealTemplateId), eq(mealTemplates.userId, userId)));
-
+  await db.update(mealTemplates).set(updates).where(and(eq(mealTemplates.id, mealTemplateId), eq(mealTemplates.userId, userId)));
   const updated = await db.select().from(mealTemplates).where(eq(mealTemplates.id, mealTemplateId)).limit(1);
   if (!updated || updated.length === 0) throw new Error("Failed to update meal template");
   return updated[0];
@@ -933,9 +1036,12 @@ export async function updateMealTemplate(
 export async function deleteMealTemplate(mealTemplateId: number, userId: number): Promise<boolean> {
   const db = await getDb();
   if (!db) {
-    throw new Error("Database is not available");
+    if (!ENV.azureSqlConnectionString) throw new Error("Database is not available");
+    const pool = await getAzureSqlPool();
+    await pool.request().input("id", mealTemplateId).input("userId", userId)
+      .query(`DELETE FROM [dbo].[meal_templates] WHERE [id]=@id AND [userId]=@userId`);
+    return true;
   }
-
   await db.delete(mealTemplates).where(and(eq(mealTemplates.id, mealTemplateId), eq(mealTemplates.userId, userId)));
   return true;
 }

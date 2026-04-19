@@ -452,10 +452,11 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   if (!response.ok) {
     const errorText = await response.text();
     const statusCode = response.status;
+    console.warn(`[LLM] Forge API returned ${statusCode}: ${errorText.slice(0, 200)}`);
 
-    // If IP is not allowed (403) or rate limited (429), fall back to Gemini
-    if ((statusCode === 403 || statusCode === 429) && ENV.geminiApiKey) {
-      console.log(`[LLM] Forge API returned ${statusCode}, falling back to Gemini API`);
+    // Fall back to Gemini on any forge API error if Gemini key is available
+    if (ENV.geminiApiKey) {
+      console.log(`[LLM] Forge API failed (${statusCode}), falling back to Gemini API`);
       return invokeGeminiFallback(params);
     }
 
@@ -464,5 +465,14 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     );
   }
 
-  return (await response.json()) as InvokeResult;
+  const responseData = await response.json() as InvokeResult;
+
+  // If forge returned an empty/invalid response, fall back to Gemini
+  const content = responseData?.choices?.[0]?.message?.content;
+  if (!content && ENV.geminiApiKey) {
+    console.log("[LLM] Forge API returned empty content, falling back to Gemini API");
+    return invokeGeminiFallback(params);
+  }
+
+  return responseData;
 }
