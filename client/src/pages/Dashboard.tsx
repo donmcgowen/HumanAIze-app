@@ -1,7 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { Scale, RefreshCw, Utensils } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Scale, Utensils } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { StepCounter } from "@/components/StepCounter";
 
@@ -41,12 +40,7 @@ function MacroCircle({ value, label, unit = "", color, size = "small" }: MacroCi
 }
 
 export default function Dashboard() {
-  const {
-    data: dashboard,
-    isLoading,
-    isError,
-    refetch: refetchDashboard,
-  } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
+  const { data: dashboard } = trpc.health.dashboard.useQuery({ rangeDays: 14 });
   const { data: syncData } = trpc.sync.status.useQuery(undefined, { refetchInterval: 30000 });
   const { data: weightEntries = [] } = trpc.weight.getEntries.useQuery({ days: 365 });
   const { data: userProfile } = trpc.profile.get.useQuery(undefined, {
@@ -128,28 +122,6 @@ export default function Dashboard() {
       {/* Header */}
       <div className="space-y-2">
         <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-slate-400">
-          Unified glucose, activity, nutrition, and sleep metrics from your connected sources.
-        </p>
-        {(isLoading || isError || !dashboard) && (
-          <div className="flex flex-wrap items-center gap-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-            <span>
-              {isLoading
-                ? "Loading dashboard data. Core cards are still shown."
-                : "Dashboard data is temporarily unavailable. Core cards are still shown."}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => refetchDashboard()}
-              className="border-amber-300/40 text-amber-100 hover:bg-amber-400/20"
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Retry
-            </Button>
-          </div>
-        )}
         {lastSyncTime && (
           <p className="text-sm text-slate-500">Last sync: {lastSyncTime}</p>
         )}
