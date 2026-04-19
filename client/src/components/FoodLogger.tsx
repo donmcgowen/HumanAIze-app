@@ -459,7 +459,10 @@ export function FoodLogger() {
 
   const createMealMutation = trpc.food.createMeal.useMutation({
     onSuccess: () => toast.success("Meal template saved!"),
-    onError: () => toast.error("Failed to save meal template"),
+    onError: (err: any) => {
+      console.error("createMeal error:", err);
+      toast.error(`Failed to save meal template: ${err?.message || "Unknown error"}`);
+    },
   });
 
   // ── Computed values ──
@@ -571,26 +574,40 @@ export function FoodLogger() {
     const loggedAt = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 12, 0, 0, 0).getTime();
 
     let copied = 0;
+    let failed = 0;
     for (const food of foodsToCopy) {
+      // Coerce all numeric fields to satisfy the addLog schema:
+      // calories must be int >= 1; macros must be number >= 0
+      const calories = Math.max(1, Math.round(Number(food.calories) || 1));
+      const proteinGrams = Math.max(0, Math.round((Number(food.proteinGrams) || 0) * 10) / 10);
+      const carbsGrams = Math.max(0, Math.round((Number(food.carbsGrams) || 0) * 10) / 10);
+      const fatGrams = Math.max(0, Math.round((Number(food.fatGrams) || 0) * 10) / 10);
+
       try {
         await addFoodLog.mutateAsync({
-          foodName: food.foodName,
+          foodName: food.foodName || "Unknown Food",
           servingSize: food.servingSize || "1 serving",
-          calories: food.calories,
-          proteinGrams: food.proteinGrams,
-          carbsGrams: food.carbsGrams,
-          fatGrams: food.fatGrams,
+          calories,
+          proteinGrams,
+          carbsGrams,
+          fatGrams,
           mealType: destinationMeal,
           loggedAt,
-          notes: food.notes,
+          notes: food.notes || undefined,
         });
         copied++;
-      } catch (e) {
-        console.error("Failed to copy food", food.foodName, e);
+      } catch (e: any) {
+        console.error("Failed to copy food", food.foodName, e?.message || e);
+        failed++;
       }
     }
     refetch();
-    toast.success(`Copied ${copied} item${copied !== 1 ? "s" : ""} to ${destinationMeal}`);
+    if (copied > 0) {
+      toast.success(`Copied ${copied} item${copied !== 1 ? "s" : ""} to ${destinationMeal}`);
+    }
+    if (failed > 0) {
+      toast.error(`${failed} item${failed !== 1 ? "s" : ""} failed to copy`);
+    }
   };
 
   const handleDeleteFoods = async (selectedFoodIds: number[]) => {
@@ -609,25 +626,27 @@ export function FoodLogger() {
 
   const handleSaveMeal = (meal: MealType, mealName: string) => {
     const foods = foodsByMeal[meal] || [];
-    const totalCalories = foods.reduce((s: number, f: any) => s + (f.calories || 0), 0);
-    const totalProtein = foods.reduce((s: number, f: any) => s + (f.proteinGrams || 0), 0);
-    const totalCarbs = foods.reduce((s: number, f: any) => s + (f.carbsGrams || 0), 0);
-    const totalFat = foods.reduce((s: number, f: any) => s + (f.fatGrams || 0), 0);
+    const totalCalories = foods.reduce((s: number, f: any) => s + (Number(f.calories) || 0), 0);
+    const totalProtein = foods.reduce((s: number, f: any) => s + (Number(f.proteinGrams) || 0), 0);
+    const totalCarbs = foods.reduce((s: number, f: any) => s + (Number(f.carbsGrams) || 0), 0);
+    const totalFat = foods.reduce((s: number, f: any) => s + (Number(f.fatGrams) || 0), 0);
 
     createMealMutation.mutate({
       mealName,
-      totalCalories: Math.round(totalCalories),
-      totalProteinGrams: Math.round(totalProtein * 10) / 10,
-      totalCarbsGrams: Math.round(totalCarbs * 10) / 10,
-      totalFatGrams: Math.round(totalFat * 10) / 10,
+      totalCalories: Math.max(1, Math.round(totalCalories)),
+      totalProteinGrams: Math.max(0, Math.round(totalProtein * 10) / 10),
+      totalCarbsGrams: Math.max(0, Math.round(totalCarbs * 10) / 10),
+      totalFatGrams: Math.max(0, Math.round(totalFat * 10) / 10),
+      // Each food item must match the schema: foodName, servingSize, calories, proteinGrams, carbsGrams, fatGrams
       foods: foods.map((f: any) => ({
-        foodName: f.foodName,
-        calories: f.calories,
-        protein: f.proteinGrams,
-        carbs: f.carbsGrams,
-        fat: f.fatGrams,
+        foodName: f.foodName || "Unknown Food",
+        servingSize: f.servingSize || "1 serving",
+        calories: Math.max(1, Math.round(Number(f.calories) || 1)),
+        proteinGrams: Math.max(0, Math.round((Number(f.proteinGrams) || 0) * 10) / 10),
+        carbsGrams: Math.max(0, Math.round((Number(f.carbsGrams) || 0) * 10) / 10),
+        fatGrams: Math.max(0, Math.round((Number(f.fatGrams) || 0) * 10) / 10),
       })),
-    } as any);
+    });
   };
 
   if (isLoading) {
