@@ -254,6 +254,9 @@ export const appRouter = router({
         return {
           success: true,
           user: result.user,
+          // Also return token in response body so native mobile apps
+          // can store it in AsyncStorage and send as Authorization header
+          token: sessionToken,
         };
       }),
     signup: publicProcedure

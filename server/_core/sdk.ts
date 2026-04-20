@@ -165,9 +165,16 @@ class SDKServer {
   }
 
   async authenticateRequest(req: Request): Promise<User> {
-    const cookies = this.parseCookies(req.headers.cookie);
-    const sessionCookie = cookies.get(COOKIE_NAME);
-    const session = await this.verifySession(sessionCookie);
+    // Support both cookie-based auth (web browser) and Bearer token auth (native mobile app)
+    let tokenValue: string | undefined;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      tokenValue = authHeader.slice(7);
+    } else {
+      const cookies = this.parseCookies(req.headers.cookie);
+      tokenValue = cookies.get(COOKIE_NAME);
+    }
+    const session = await this.verifySession(tokenValue);
 
     if (!session) throw ForbiddenError("Invalid session cookie");
 
