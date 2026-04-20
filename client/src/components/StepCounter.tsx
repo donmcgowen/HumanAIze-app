@@ -13,6 +13,7 @@ import {
   CheckCircle,
   AlertCircle,
   Info,
+  HelpCircle,
 } from "lucide-react";
 import {
   BarChart,
@@ -132,6 +133,7 @@ async function parseStepsCSV(file: File): Promise<ParsedDay[]> {
 // ---------- component --------------------------------------------------------
 
 const DAILY_GOAL = 10000;
+const AUTO_TRACK_KEY = "humanaize_step_autotrack";
 
 interface StepCounterProps {
   onTotalChange?: (total: number) => void;
@@ -140,7 +142,8 @@ interface StepCounterProps {
 type ImportStatus = { type: "success" | "error"; message: string } | null;
 
 export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
-  const dayStart = todayStart();
+  // Track the current day so we can detect midnight rollover
+  const [dayStart, setDayStart] = useState(todayStart);
 
   // Server state
   const { data: savedSteps = 0, refetch: refetchToday } = trpc.steps.getToday.useQuery({ dayStart });
@@ -155,8 +158,14 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   const [isTracking, setIsTracking] = useState(false);
   const [supported, setSupported] = useState<boolean | null>(null);
 
+  // Auto-track preference (persisted in localStorage)
+  const [autoTrack, setAutoTrack] = useState(() => {
+    try { return localStorage.getItem(AUTO_TRACK_KEY) === "1"; } catch { return false; }
+  });
+
   // Import UI state
   const [showImport, setShowImport] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [manualSteps, setManualSteps] = useState("");
   const [importStatus, setImportStatus] = useState<ImportStatus>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -173,6 +182,37 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
   useEffect(() => {
     setSupported(typeof DeviceMotionEvent !== "undefined");
   }, []);
+
+  // Midnight reset: check every minute if the day has changed
+  useEffect(() => {
+    const midnightCheck = setInterval(() => {
+      const newDayStart = todayStart();
+      if (newDayStart !== dayStart) {
+        // Day has rolled over — reset session steps and refresh server data
+        setDayStart(newDayStart);
+        setSessionSteps(0);
+        sessionStepsRef.current = 0;
+        refetchToday();
+        refetchHistory();
+      }
+    }, 60_000); // check every 60 seconds
+    return () => clearInterval(midnightCheck);
+  }, [dayStart, refetchToday, refetchHistory]);
+
+  // Auto-start tracking when page loads if preference is set
+  useEffect(() => {
+    if (autoTrack && supported && !isTracking) {
+      startTracking();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supported, autoTrack]);
+
+  const toggleAutoTrack = (val: boolean) => {
+    setAutoTrack(val);
+    try { localStorage.setItem(AUTO_TRACK_KEY, val ? "1" : "0"); } catch {}
+    if (val && !isTracking) startTracking();
+    if (!val && isTracking) stopTracking();
+  };
 
   // Persist to server whenever sessionSteps changes (debounced 2 s)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -383,37 +423,84 @@ export function StepCounter({ onTotalChange }: StepCounterProps = {}) {
 
       {/* Live tracking controls */}
       {supported && (
-        <div className="flex gap-2">
-          {!isTracking ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-800 text-xs"
-              onClick={startTracking}
+        <div className="space-y-2">
+          {/* Auto-track toggle row */}
+          <div className="flex items-center justify-between bg-slate-800/60 rounded-md px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Smartphone className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-xs text-slate-300 font-medium">Auto-start when app opens</span>
+              <button
+                onClick={() => setShowHowItWorks((v) => !v)}
+                className="text-slate-500 hover:text-slate-300 transition-colors"
+                title="How does this work?"
+              >
+                <HelpCircle className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {/* Toggle switch */}
+            <button
+              onClick={() => toggleAutoTrack(!autoTrack)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${
+                autoTrack ? "bg-cyan-500" : "bg-slate-600"
+              }`}
             >
-              <Smartphone className="w-3 h-3 mr-1" />
-              Start Live Tracking
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1 border-red-500/50 text-red-400 hover:bg-red-500/10 text-xs"
-              onClick={stopTracking}
-            >
-              Stop Tracking
-            </Button>
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                  autoTrack ? "translate-x-4" : "translate-x-1"
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* How it works explanation */}
+          {showHowItWorks && (
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-md p-3 space-y-1.5 text-xs text-blue-200">
+              <p className="font-semibold text-blue-300">How the live step counter works</p>
+              <p>The app uses your phone's <strong>accelerometer</strong> (motion sensor) to detect the physical jolt of each step — the same way a fitness app counts steps.</p>
+              <p className="font-medium text-yellow-300 mt-1">Important limitations:</p>
+              <ul className="list-disc list-inside space-y-1 text-yellow-200/80">
+                <li><strong>App must be open</strong> — it only counts while this page is visible on your screen.</li>
+                <li><strong>Counts from now</strong> — it does not pick up steps taken before you opened the app today.</li>
+                <li><strong>iPhone requires a permission tap</strong> — iOS asks for motion sensor access the first time.</li>
+                <li><strong>Not as accurate as a dedicated fitness app</strong> — phone position matters (pocket vs. hand).</li>
+              </ul>
+              <p className="text-slate-400 mt-1">For full-day step history, use the <strong>Import</strong> option to pull data from your phone's Health app.</p>
+            </div>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-slate-600 text-slate-300 hover:bg-slate-800 text-xs px-2"
-            onClick={() => { setShowImport((v) => !v); setImportStatus(null); }}
-          >
-            <Upload className="w-3 h-3 mr-1" />
-            Import
-            {showImport ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
-          </Button>
+
+          {/* Manual start/stop + import row */}
+          <div className="flex gap-2">
+            {!isTracking ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-800 text-xs"
+                onClick={startTracking}
+              >
+                <Smartphone className="w-3 h-3 mr-1" />
+                Start Tracking Now
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 border-red-500/50 text-red-400 hover:bg-red-500/10 text-xs"
+                onClick={stopTracking}
+              >
+                Stop Tracking
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-slate-600 text-slate-300 hover:bg-slate-800 text-xs px-2"
+              onClick={() => { setShowImport((v) => !v); setImportStatus(null); }}
+            >
+              <Upload className="w-3 h-3 mr-1" />
+              Import
+              {showImport ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+            </Button>
+          </div>
         </div>
       )}
 
