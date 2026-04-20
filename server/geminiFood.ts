@@ -1,4 +1,5 @@
 import { invokeLLM } from "./_core/llm";
+import { ENV } from "./_core/env";
 
 export interface FoodVariation {
   name: string;
@@ -7,9 +8,137 @@ export interface FoodVariation {
   proteinPer100g: number;
   carbsPer100g: number;
   fatPer100g: number;
+  servingSize?: string;
 }
 
+/**
+ * Search for food nutrition facts using Gemini with Google Search grounding.
+ * This allows Gemini to look up real product pages, nutrition databases, and
+ * manufacturer websites to find accurate nutrition data for branded products
+ * that may not be in USDA or Open Food Facts.
+ */
 export async function searchFoodWithGemini(query: string): Promise<FoodVariation[]> {
+  // Try Google Search grounded Gemini first (most accurate for branded products)
+  const geminiKey = ENV.geminiApiKey;
+  if (geminiKey) {
+    try {
+      const results = await searchFoodWithGeminiGrounded(query, geminiKey);
+      if (results.length > 0) return results;
+    } catch (err) {
+      console.warn("[GeminiFood] Grounded search failed, falling back to LLM-only:", err);
+    }
+  }
+
+  // Fallback: use the standard LLM invocation (no grounding, uses training data)
+  return searchFoodWithLLM(query);
+}
+
+/**
+ * Use Gemini with Google Search grounding to find real product nutrition data.
+ * Calls the Gemini API directly with the googleSearch tool enabled.
+ */
+async function searchFoodWithGeminiGrounded(query: string, apiKey: string): Promise<FoodVariation[]> {
+  const GEMINI_MODEL = "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+
+  const prompt = `You are a nutrition database expert. Use Google Search to look up the exact nutrition facts for this food or product: "${query}"
+
+Search for the official product page, nutrition label, or a trusted nutrition database entry.
+
+Return a JSON object with a "foods" array of up to 5 matching products. Each item must have:
+- name: exact product name including brand and flavor/variety
+- description: brand name, product line, or brief description
+- caloriesPer100g: calories per 100 grams (convert from label if needed)
+- proteinPer100g: protein grams per 100g
+- carbsPer100g: carbohydrates grams per 100g  
+- fatPer100g: fat grams per 100g
+- servingSize: the serving size from the label (e.g. "55g", "1 cup (240ml)", "2 scoops (82g)")
+
+IMPORTANT:
+- All macro values MUST be per 100g (normalize from the label serving size)
+- Use REAL nutrition data from the product label, not estimates
+- If multiple flavors/varieties exist, list the most popular ones
+- Return ONLY valid JSON, no markdown
+
+Example format:
+{
+  "foods": [
+    {
+      "name": "Post Premier Protein High Protein Cereal, Cinnamon Crunch",
+      "description": "Post Consumer Brands",
+      "caloriesPer100g": 367,
+      "proteinPer100g": 33.3,
+      "carbsPer100g": 46.7,
+      "fatPer100g": 3.3,
+      "servingSize": "60g (2/3 cup)"
+    }
+  ]
+}`;
+
+  const requestBody = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    tools: [{ googleSearch: {} }],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 4096,
+      responseMimeType: "application/json",
+    },
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini grounded search error: ${response.status} – ${errorText.slice(0, 200)}`);
+  }
+
+  const data = await response.json() as any;
+  const responseText: string = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+
+  if (!responseText) {
+    throw new Error("Empty response from Gemini grounded search");
+  }
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(responseText);
+  } catch {
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      parsed = JSON.parse(jsonMatch[0]);
+    } else {
+      throw new Error("Could not parse JSON from Gemini grounded response");
+    }
+  }
+
+  const foods: FoodVariation[] = Array.isArray(parsed) ? parsed : parsed?.foods;
+  if (!Array.isArray(foods)) throw new Error("Response is not an array");
+
+  // Validate and sanitize each food entry
+  return foods
+    .filter(f => f && typeof f.name === "string" && f.name.trim())
+    .map(f => ({
+      name: String(f.name).trim(),
+      description: String(f.description || "").trim(),
+      caloriesPer100g: Math.max(0, Number(f.caloriesPer100g) || 0),
+      proteinPer100g: Math.max(0, Number(f.proteinPer100g) || 0),
+      carbsPer100g: Math.max(0, Number(f.carbsPer100g) || 0),
+      fatPer100g: Math.max(0, Number(f.fatPer100g) || 0),
+      servingSize: f.servingSize ? String(f.servingSize).trim() : undefined,
+    }))
+    .filter(f => f.caloriesPer100g > 0 || f.proteinPer100g > 0)
+    .slice(0, 5);
+}
+
+/**
+ * Fallback: use the standard LLM (no grounding) for food nutrition lookup.
+ * Uses training data only — less accurate for very new or niche products.
+ */
+async function searchFoodWithLLM(query: string): Promise<FoodVariation[]> {
   try {
     const response = await invokeLLM({
       messages: [
@@ -26,7 +155,8 @@ Format:
       "caloriesPer100g": 165,
       "proteinPer100g": 31,
       "carbsPer100g": 0,
-      "fatPer100g": 3.6
+      "fatPer100g": 3.6,
+      "servingSize": "100g"
     }
   ]
 }
@@ -40,6 +170,7 @@ If the query is a BRANDED or PACKAGED product (e.g. "Muscle Milk", "Quest Bar", 
 - Return the actual product variants (flavors, sizes, formulas) with real nutrition facts from the product label
 - Include the exact brand name and flavor in the "name" field
 - Use accurate macros from the real product — do NOT make up generic values
+- Include the serving size from the product label in the "servingSize" field
 
 If the query is a GENERIC whole food (e.g. "chicken", "rice", "broccoli"):
 - Return variations by cooking method (grilled, baked, raw, fried) and cuts/types
@@ -69,8 +200,9 @@ If the query is a GENERIC whole food (e.g. "chicken", "rice", "broccoli"):
                     proteinPer100g: { type: "number" },
                     carbsPer100g: { type: "number" },
                     fatPer100g: { type: "number" },
+                    servingSize: { type: "string" },
                   },
-                  required: ["name", "description", "caloriesPer100g", "proteinPer100g", "carbsPer100g", "fatPer100g"],
+                  required: ["name", "description", "caloriesPer100g", "proteinPer100g", "carbsPer100g", "fatPer100g", "servingSize"],
                   additionalProperties: false,
                 },
               },
@@ -110,7 +242,7 @@ If the query is a GENERIC whole food (e.g. "chicken", "rice", "broccoli"):
 
     return foods.slice(0, 10);
   } catch (error) {
-    console.error("Error searching food with Gemini:", error);
+    console.error("Error searching food with Gemini LLM:", error);
     throw new Error(`Failed to search food: ${error instanceof Error ? error.message : "Unknown error"}`);
   }
 }

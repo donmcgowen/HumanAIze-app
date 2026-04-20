@@ -20,6 +20,10 @@ export interface USDAFoodResult {
   servingSize: string;
   servingUnit?: string;
   brand?: string;
+  /** Raw household serving text from USDA, e.g. "2 SCOOPS", "1 CUP" */
+  householdServingText?: string;
+  /** Gram weight of ONE unit (scoop/serving/piece) from the product label */
+  servingWeightPerUnit?: number;
 }
 
 function mapFoodItem(food: any): USDAFoodResult {
@@ -105,6 +109,22 @@ function mapFoodItem(food: any): USDAFoodResult {
     servingSize = `${food.servingSize}${food.servingSizeUnit}`;
   }
 
+  // Calculate per-unit weight for scoop/serving-based products
+  // e.g. Muscle Milk Pro: 2 scoops = 106g total → 1 scoop = 53g
+  let servingWeightPerUnit: number | undefined;
+  if (householdText) {
+    const unitMultiplierMatch = householdText.match(/^(\d+(?:\.\d+)?)\s+/i);
+    const unitMultiplier = unitMultiplierMatch ? parseFloat(unitMultiplierMatch[1]) : 1;
+    if (unitMultiplier > 1 && unitMultiplier <= 10) {
+      // servingWeightG is the TOTAL weight for unitMultiplier units
+      servingWeightPerUnit = servingWeightG / unitMultiplier;
+    } else {
+      servingWeightPerUnit = servingWeightG;
+    }
+  } else if (servingWeightG !== 100) {
+    servingWeightPerUnit = servingWeightG;
+  }
+
   return {
     fdcId: food.fdcId,
     foodName: food.description || "Unknown Food",
@@ -119,6 +139,7 @@ function mapFoodItem(food: any): USDAFoodResult {
     servingUnit: food.servingSizeUnit || "g",
     brand: food.brandOwner || food.brandName || undefined,
     householdServingText: householdText || undefined,
+    servingWeightPerUnit,
   };
 }
 

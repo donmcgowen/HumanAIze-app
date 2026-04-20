@@ -1216,7 +1216,36 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           carbsPer100g: number;
           fatPer100g: number;
           servingSize?: string;
+          /** Gram weight of ONE unit (1 scoop, 1 serving, etc.) — used by client to calculate macros correctly */
+          servingWeightPerUnit?: number;
         };
+
+        /** Parse per-unit gram weight from a serving size string like "106g (2 scoops)" → 53 */
+        const parseServingWeightPerUnit = (servingSize?: string): number | undefined => {
+          if (!servingSize) return undefined;
+          const multiMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g\s*\((\d+(?:\.\d+)?)\s+\w/i);
+          if (multiMatch) {
+            const totalG = parseFloat(multiMatch[1]);
+            const count = parseFloat(multiMatch[2]);
+            return (count > 1 && count <= 10) ? totalG / count : totalG;
+          }
+          const gMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g/i);
+          if (gMatch) return parseFloat(gMatch[1]);
+          return undefined;
+        };
+
+        /** Map Gemini FoodVariation results to FoodResult with servingWeightPerUnit */
+        const mapGeminiResults = (geminiResults: Awaited<ReturnType<typeof searchFoodWithGemini>>): FoodResult[] =>
+          geminiResults.map(g => ({
+            name: g.name,
+            description: g.description,
+            caloriesPer100g: g.caloriesPer100g,
+            proteinPer100g: g.proteinPer100g,
+            carbsPer100g: g.carbsPer100g,
+            fatPer100g: g.fatPer100g,
+            servingSize: g.servingSize,
+            servingWeightPerUnit: parseServingWeightPerUnit(g.servingSize),
+          }));
 
         const mapUsdaResults = (usdaResults: Awaited<ReturnType<typeof searchUSDAFoods>>): FoodResult[] =>
           usdaResults.map((food) => ({
@@ -1227,6 +1256,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
             carbsPer100g: food.carbsGrams,
             fatPer100g: food.fatGrams,
             servingSize: food.servingSize || "100g",
+            servingWeightPerUnit: food.servingWeightPerUnit,
           }));
 
         // 1. Check local file cache first (fast, always available)
@@ -1348,16 +1378,38 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
 
           // Sort by relevance score descending, then take top 5
           merged.sort((a, b) => b._score - a._score);
+          const topScore = merged[0]?._score ?? 0;
           results = merged.slice(0, 5).map(({ _score, ...food }) => food);
           resultSource = "branded";
-          console.log(`[Food Search] Branded search found ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length}, top5 selected)`);
+          console.log(`[Food Search] Branded search found ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length}, top5 selected, topScore: ${topScore})`);
+
+          // If the best match score is very low (< 30), the databases didn't find a good match.
+          // Try Gemini internet search to supplement with better results.
+          if (topScore < 30) {
+            console.log(`[Food Search] Low relevance scores (best: ${topScore}) — trying Gemini internet search for better matches`);
+            try {
+              const geminiResults = await searchFoodWithGemini(normalizedQuery);
+              if (geminiResults.length > 0) {
+                const geminiMapped = mapGeminiResults(geminiResults).slice(0, 3);
+                // Merge: Gemini first, then remaining DB results (deduped by name)
+                const existingNames = new Set(geminiMapped.map(r => r.name.toLowerCase()));
+                const remainingDb = results.filter(r => !existingNames.has(r.name.toLowerCase()));
+                results = [...geminiMapped, ...remainingDb].slice(0, 5);
+                resultSource = "gemini";
+                console.log(`[Food Search] Gemini supplemented results: ${geminiMapped.length} Gemini + ${remainingDb.length} DB = ${results.length} total`);
+              }
+            } catch (err) {
+              console.warn(`[Food Search] Gemini supplement search failed:`, err);
+            }
+          }
         }
 
-        // 4. If no branded results, try Gemini AI
+        // 4. If no branded results, try Gemini AI (with Google Search grounding for internet lookup)
         if (results.length === 0) {
           try {
-            console.log(`[Food Search] No branded results — trying Gemini for "${normalizedQuery}"`);
-            results = (await searchFoodWithGemini(normalizedQuery)).slice(0, 5);
+            console.log(`[Food Search] No branded results — trying Gemini internet search for "${normalizedQuery}"`);
+            const geminiResults = await searchFoodWithGemini(normalizedQuery);
+            results = mapGeminiResults(geminiResults).slice(0, 5);
             if (results.length > 0) {
               resultSource = "gemini";
             }
@@ -1400,7 +1452,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
       .input(
         z.object({
           foodName: z.string(),
-          caloriesPer100g: z.number().positive(),
+          caloriesPer100g: z.number().nonnegative(),
           proteinPer100g: z.number().nonnegative(),
           carbsPer100g: z.number().nonnegative(),
           fatPer100g: z.number().nonnegative(),

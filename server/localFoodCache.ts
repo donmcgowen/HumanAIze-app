@@ -14,6 +14,8 @@ export interface CachedFoodEntry {
   carbsPer100g: number;
   fatPer100g: number;
   servingSize?: string;
+  /** Gram weight of ONE unit (1 scoop, 1 serving, etc.) */
+  servingWeightPerUnit?: number;
 }
 
 interface CacheRecord {

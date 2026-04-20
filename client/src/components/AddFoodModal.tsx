@@ -165,18 +165,35 @@ function getSmartUnits(foodName: string, description?: string): { value: string;
   ];
 }
 
-// Parse gram weight from a serving size string like "53g", "1.87oz", "2 scoops (82g)"
+// Parse gram weight of ONE UNIT from a serving size string.
+// Handles multi-unit strings like "106g (2 scoops)" → 53g per scoop.
 function parseServingWeightG(servingSize?: string): number | undefined {
   if (!servingSize) return undefined;
-  // Try to find explicit gram value in parentheses first: "2 scoops (82g)" → 82
+
+  // Check for "Xg (N scoops/servings/cups/etc)" pattern — divide by N to get per-unit weight
+  // e.g. "106g (2 scoops)" → 106 / 2 = 53g per scoop
+  const multiUnitMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g\s*\((\d+(?:\.\d+)?)\s+\w/i);
+  if (multiUnitMatch) {
+    const totalG = parseFloat(multiUnitMatch[1]);
+    const count = parseFloat(multiUnitMatch[2]);
+    if (count > 1 && count <= 10 && totalG > 0) {
+      return totalG / count;
+    }
+    return totalG;
+  }
+
+  // Try to find explicit gram value in parentheses: "2 scoops (82g)" → 82
   const parenMatch = servingSize.match(/\((\d+(?:\.\d+)?)\s*g\)/i);
   if (parenMatch) return parseFloat(parenMatch[1]);
+
   // Direct gram value: "53g" → 53
   const gMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g$/i);
   if (gMatch) return parseFloat(gMatch[1]);
+
   // Oz value: "1.87oz" → convert to grams
   const ozMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*oz$/i);
   if (ozMatch) return parseFloat(ozMatch[1]) * 28.35;
+
   return undefined;
 }
 
@@ -220,20 +237,21 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
   // When searching, mark which results match recent foods
   const recentFoodNames = new Set(recentFoods.map((f: any) => f.foodName.toLowerCase()));
 
+  const parsedAmount = parseFloat(servingAmount);
   const { data: calculatedMacros } = trpc.food.calculateServingMacros.useQuery(
-    selectedFood && !selectedFood.isRecentLog && servingAmount
+    selectedFood && !selectedFood.isRecentLog && servingAmount && parsedAmount > 0
       ? {
           foodName: selectedFood.name,
-          caloriesPer100g: selectedFood.caloriesPer100g,
-          proteinPer100g: selectedFood.proteinPer100g,
-          carbsPer100g: selectedFood.carbsPer100g,
-          fatPer100g: selectedFood.fatPer100g,
-          amount: parseFloat(servingAmount) || 0,
+          caloriesPer100g: selectedFood.caloriesPer100g ?? 0,
+          proteinPer100g: selectedFood.proteinPer100g ?? 0,
+          carbsPer100g: selectedFood.carbsPer100g ?? 0,
+          fatPer100g: selectedFood.fatPer100g ?? 0,
+          amount: parsedAmount,
           unit: servingUnit,
           servingWeightG: servingWeightG,
         }
       : skipToken,
-    { enabled: !!selectedFood && !selectedFood.isRecentLog && !!servingAmount }
+    { enabled: !!selectedFood && !selectedFood.isRecentLog && !!servingAmount && parsedAmount > 0 }
   );
 
   const handleSelectFood = (food: any) => {
@@ -243,19 +261,23 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
     const smartUnits = getSmartUnits(food?.name ?? "", food?.description ?? "");
     const defaultUnit = smartUnits[0]?.value ?? "g";
 
-    // Parse the actual gram weight of one serving from the serving size string
-    const weightG = parseServingWeightG(food?.servingSize);
+    // Prefer the server-provided servingWeightPerUnit (already per-unit, e.g. 53g per scoop).
+    // Fall back to parsing the servingSize string ourselves.
+    let weightG: number | undefined = food?.servingWeightPerUnit;
+    if (!weightG) {
+      weightG = parseServingWeightG(food?.servingSize);
+    }
     setServingWeightG(weightG);
 
     // Try to parse the serving size string to get a human-friendly default amount/unit
     const parsedServing = parseServingSizeForInput(food?.servingSize);
     if (parsedServing) {
       // If the food is a powder/supplement and the parsed unit is grams,
-      // override to scoops (using the gram weight as the scoop weight)
+      // override to scoops (using the per-unit gram weight)
       if (defaultUnit === "scoop" && parsedServing.unit === "g") {
         setServingAmount("1");
         setServingUnit("scoop");
-        // servingWeightG already set above from the gram value in servingSize
+        // servingWeightG is already set to the per-scoop weight above
         return;
       }
       setServingAmount(parsedServing.amount);
@@ -340,7 +362,9 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
         <p className="text-xs text-gray-500">
           {debouncedQuery.trim().length <= 2
             ? "Type to search branded products, or pick a recent food below"
-            : "Searching branded products database..."}
+            : isLoading
+              ? "Searching products database and internet..."
+              : "Search any food, brand, or supplement"}
         </p>
       </div>
 
