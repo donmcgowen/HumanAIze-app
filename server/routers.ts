@@ -755,6 +755,81 @@ Be concise, friendly, and actionable. Format responses with bullet points or sho
         const { foodLogId, ...updates } = input;
         return updateFoodLog(foodLogId, ctx.user.id, updates);
       }),
+    // ── Mobile-compatible aliases ─────────────────────────────────────────────
+    // The React Native mobile app uses these procedure names and payload shapes.
+    // They translate to the same underlying DB functions as the web app.
+    addFoodEntry: protectedProcedure
+      .input(
+        z.object({
+          name: z.string().min(1),
+          calories: z.number().min(0),
+          protein: z.number().min(0),
+          carbs: z.number().min(0),
+          fat: z.number().min(0),
+          meal: z.string().optional(),       // "Breakfast" | "Lunch" | "Dinner" | "Snacks"
+          amount: z.number().positive().optional(),
+          unit: z.string().optional(),
+          date: z.string().optional(),        // "yyyy-MM-dd"
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        // Map mobile payload → web payload
+        const mealType = (input.meal?.toLowerCase() ?? "other") as any;
+        const validMeal = ["breakfast", "lunch", "dinner", "snack", "other"].includes(mealType)
+          ? mealType
+          : mealType === "snacks" ? "snack" : "other";
+        const loggedAt = input.date
+          ? new Date(input.date + "T12:00:00").getTime()
+          : Date.now();
+        const servingSize = input.amount && input.unit
+          ? `${input.amount} ${input.unit}`
+          : "1 serving";
+        const result = await addFoodLog(ctx.user.id, {
+          foodName: input.name,
+          servingSize,
+          calories: Math.max(1, Math.round(input.calories)),
+          proteinGrams: Math.max(0, input.protein),
+          carbsGrams: Math.max(0, input.carbs),
+          fatGrams: Math.max(0, input.fat),
+          loggedAt,
+          mealType: validMeal,
+        });
+        autoAddToFavorites(ctx.user.id, input.name).catch(() => {});
+        return result;
+      }),
+    getFoodLog: protectedProcedure
+      .input(
+        z.object({
+          date: z.string(), // "yyyy-MM-dd"
+        })
+      )
+      .query(async ({ ctx, input }) => {
+        const d = new Date(input.date + "T00:00:00");
+        const startOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime();
+        const endOfDay   = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime();
+        const logs = await getFoodLogsForDay(ctx.user.id, startOfDay, endOfDay);
+        // Map to mobile-friendly shape: { entries: FoodEntry[] }
+        const entries = (logs as any[]).map((log: any) => ({
+          id: log.id,
+          name: log.foodName,
+          calories: log.calories,
+          protein: log.proteinGrams,
+          carbs: log.carbsGrams,
+          fat: log.fatGrams,
+          meal: log.mealType,
+          amount: parseFloat((log.servingSize || "1").match(/^([\d.]+)/)?.[1] || "1") || 1,
+          unit: (log.servingSize || "1 serving").match(/^[\d.]+\s*(.+)$/)?.[1]?.trim() || "serving",
+        }));
+        return { entries };
+      }),
+    deleteFoodEntry: protectedProcedure
+      .input(
+        z.object({
+          id: z.number().int().positive(),
+        })
+      )
+      .mutation(({ ctx, input }) => deleteFoodLog(input.id, ctx.user.id)),
+    // ── End mobile-compatible aliases ─────────────────────────────────────────
     searchUSDA: protectedProcedure
       .input(
         z.object({
