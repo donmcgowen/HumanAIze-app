@@ -1870,6 +1870,45 @@ Be specific and practical. Return JSON only.`;
           (e) => e.recordedAt >= input.dayStart && e.recordedAt < input.dayEnd
         );
       }),
+
+    // ── Gemini AI Workout Plan Generator ──────────────────────────────────────
+    getAIWorkoutPlan: protectedProcedure
+      .input(
+        z.object({
+          workoutType: z.enum(["strength", "cardio", "hiit", "flexibility", "full_body", "upper_body", "lower_body", "core"]).default("full_body"),
+          durationMins: z.number().int().min(10).max(120).default(45),
+          intensity: z.enum(["light", "moderate", "intense"]).default("moderate"),
+          customRequest: z.string().max(500).optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const [profile, recentWorkouts] = await Promise.all([
+          getUserProfile(ctx.user.id),
+          getWorkoutEntries(ctx.user.id, 14),
+        ]);
+
+        const { generateAIWorkoutPlan } = await import("./geminiWorkout");
+        const plan = await generateAIWorkoutPlan({
+          ageYears: profile?.ageYears ?? undefined,
+          heightIn: profile?.heightIn ?? undefined,
+          weightLbs: profile?.weightLbs ?? undefined,
+          fitnessGoal: (profile?.fitnessGoal as any) ?? "maintain",
+          activityLevel: (profile?.activityLevel as any) ?? "moderately_active",
+          diabetesType: (profile?.diabetesType as any) ?? null,
+          workoutType: input.workoutType,
+          durationMins: input.durationMins,
+          intensity: input.intensity,
+          recentWorkouts: recentWorkouts.slice(0, 10).map((w) => ({
+            exerciseName: w.exerciseName,
+            exerciseType: w.exerciseType,
+            durationMinutes: w.durationMinutes,
+            recordedAt: w.recordedAt,
+          })),
+          customRequest: input.customRequest,
+        });
+
+        return plan;
+      }),
   }),
   bodyMeasurements: router({
     addEntry: protectedProcedure
