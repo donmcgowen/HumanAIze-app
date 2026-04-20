@@ -303,6 +303,126 @@ export const appRouter = router({
         };
       }),
   }),
+  // Mobile-compatible user profile procedures
+  // The mobile app uses "user.getProfile" and "user.updateProfile"
+  // which map to the server's profile.get / profile.upsert with field name translation
+  user: router({
+    getProfile: protectedProcedure.query(async ({ ctx }) => {
+      const userId = Number(ctx.user.id);
+      if (!Number.isFinite(userId)) throw new TRPCError({ code: "UNAUTHORIZED" });
+      const prof = await getUserProfile(userId);
+      if (!prof) return null;
+      // Translate server field names → mobile field names
+      return {
+        // Identity
+        name: ctx.user.name || ctx.user.username || "",
+        email: ctx.user.email || "",
+        // Stats (mobile uses age/height/currentWeight/goalWeight)
+        age: prof.ageYears ?? null,
+        height: prof.heightIn ?? null,
+        currentWeight: prof.weightLbs ?? null,
+        goalWeight: prof.goalWeightLbs ?? null,
+        // Goal (mobile uses "lose_weight"/"gain_muscle" etc., server uses "lose_fat"/"build_muscle")
+        goal: prof.fitnessGoal === "lose_fat" ? "lose_weight"
+            : prof.fitnessGoal === "build_muscle" ? "gain_muscle"
+            : prof.fitnessGoal ?? "maintain",
+        // Activity (mobile uses "light"/"moderate"/"active" etc., server uses full names)
+        activityLevel: prof.activityLevel === "lightly_active" ? "light"
+                     : prof.activityLevel === "moderately_active" ? "moderate"
+                     : prof.activityLevel === "very_active" ? "active"
+                     : prof.activityLevel === "extremely_active" ? "very_active"
+                     : prof.activityLevel ?? "moderate",
+        // Health conditions: stored as JSON string in DB, returned as array
+        healthConditions: (() => {
+          if (!prof.healthConditions) return [];
+          try { return JSON.parse(prof.healthConditions); } catch { return [prof.healthConditions]; }
+        })(),
+        // Target date: stored as Unix ms timestamp, returned as ISO string
+        targetDate: prof.goalDate ? new Date(prof.goalDate).toISOString() : null,
+        // Daily targets (mobile uses proteinTarget/carbTarget/fatTarget)
+        dailyCalorieTarget: prof.dailyCalorieTarget ?? null,
+        proteinTarget: prof.dailyProteinTarget ?? null,
+        carbTarget: prof.dailyCarbsTarget ?? null,
+        fatTarget: prof.dailyFatTarget ?? null,
+        // Pass-through fields
+        gender: prof.gender ?? null,
+        diabetesType: prof.diabetesType ?? null,
+        onboardingCompleted: prof.onboardingCompleted ?? false,
+        geminiPlan: prof.geminiPlan ?? null,
+      };
+    }),
+    updateProfile: protectedProcedure
+      .input(z.object({
+        name: z.string().optional(),
+        age: z.number().optional(),
+        // height as total inches (from profile edit)
+        height: z.number().optional(),
+        // height as separate feet + inches (from onboarding)
+        heightFt: z.number().optional(),
+        heightIn: z.number().optional(),
+        currentWeight: z.number().optional(),
+        goalWeight: z.number().optional(),
+        goal: z.string().optional(),
+        activityLevel: z.string().optional(),
+        healthConditions: z.array(z.string()).optional(),
+        targetDate: z.string().optional(),
+        // gender from profile edit
+        gender: z.string().optional(),
+        // sex from onboarding (maps to gender)
+        sex: z.string().optional(),
+        dailyCalorieTarget: z.number().optional(),
+        proteinTarget: z.number().optional(),
+        carbTarget: z.number().optional(),
+        fatTarget: z.number().optional(),
+        onboardingCompleted: z.boolean().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const userId = Number(ctx.user.id);
+        if (!Number.isFinite(userId)) throw new TRPCError({ code: "UNAUTHORIZED" });
+        // Translate mobile field names → server DB field names
+        const goalMap: Record<string, string> = {
+          lose_weight: "lose_fat",
+          gain_muscle: "build_muscle",
+          maintain: "maintain",
+          lose_fat: "lose_fat",
+          build_muscle: "build_muscle",
+        };
+        const activityMap: Record<string, string> = {
+          sedentary: "sedentary",
+          light: "lightly_active",
+          moderate: "moderately_active",
+          active: "very_active",
+          very_active: "extremely_active",
+          lightly_active: "lightly_active",
+          moderately_active: "moderately_active",
+          very_active_server: "very_active",
+        };
+        const updates: Record<string, any> = {};
+        if (input.age !== undefined)           updates.ageYears = input.age;
+        // Height: prefer total inches; fall back to ft+in from onboarding
+        if (input.height !== undefined) {
+          updates.heightIn = Math.round(input.height);
+        } else if (input.heightFt !== undefined || input.heightIn !== undefined) {
+          updates.heightIn = Math.round((input.heightFt ?? 0) * 12 + (input.heightIn ?? 0));
+        }
+        if (input.currentWeight !== undefined) updates.weightLbs = Math.round(input.currentWeight);
+        if (input.goalWeight !== undefined)    updates.goalWeightLbs = Math.round(input.goalWeight);
+        if (input.goal !== undefined)          updates.fitnessGoal = goalMap[input.goal] ?? input.goal;
+        if (input.activityLevel !== undefined) updates.activityLevel = activityMap[input.activityLevel] ?? input.activityLevel;
+        if (input.healthConditions !== undefined) updates.healthConditions = JSON.stringify(input.healthConditions);
+        if (input.targetDate !== undefined)    updates.goalDate = input.targetDate ? new Date(input.targetDate).getTime() : null;
+        // gender from profile edit OR sex from onboarding
+        if (input.gender !== undefined)        updates.gender = input.gender;
+        else if (input.sex !== undefined)      updates.gender = input.sex;
+        if (input.dailyCalorieTarget !== undefined) updates.dailyCalorieTarget = input.dailyCalorieTarget;
+        if (input.proteinTarget !== undefined) updates.dailyProteinTarget = input.proteinTarget;
+        if (input.carbTarget !== undefined)    updates.dailyCarbsTarget = input.carbTarget;
+        if (input.fatTarget !== undefined)     updates.dailyFatTarget = input.fatTarget;
+        if (input.onboardingCompleted !== undefined) updates.onboardingCompleted = input.onboardingCompleted;
+        await upsertUserProfile(userId, updates as any);
+        return { success: true };
+      }),
+  }),
   health: router({
     dashboard: protectedProcedure.input(rangeInput).query(({ ctx, input }) => {
       return getDashboardBundle(ctx.user.id, input.rangeDays);
