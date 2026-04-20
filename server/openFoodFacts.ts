@@ -201,13 +201,45 @@ export async function lookupOpenFoodFactsByBarcode(
       }
     }
 
+    // Try to get per-serving values directly from OFF (more accurate than computing from per-100g)
+    const getServingValue = (key: string): number => {
+      const servingKey = `${key}_serving`;
+      const v = nutriments[servingKey];
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+      if (typeof v === "string") {
+        const p = Number(v);
+        if (Number.isFinite(p) && p > 0) return p;
+      }
+      return 0;
+    };
+
+    // Prefer per-serving values; fall back to computing from per-100g × serving size
+    const servingSizeNum = parseFloat(servingSize) || 100;
+    const servingInMlOrG = servingUnit.toLowerCase() === "oz"
+      ? servingSizeNum * 29.5735   // fl oz → ml
+      : servingSizeNum;
+    const scaleFactor = servingInMlOrG / 100;
+
+    const cal100g = caloriesFromKcal || (caloriesFromKj ? caloriesFromKj / 4.184 : 0);
+    const pro100g = getPer100gValue(nutriments, "proteins");
+    const carb100g = getPer100gValue(nutriments, "carbohydrates");
+    const fat100g = getPer100gValue(nutriments, "fat");
+    const sugar100g = getPer100gValue(nutriments, "sugars");
+
+    // Per-serving: use OFF's _serving fields if available, otherwise scale from per-100g
+    const calServing  = getServingValue("energy-kcal") || (scaleFactor > 0 ? cal100g * scaleFactor : cal100g);
+    const proServing  = getServingValue("proteins")    || (scaleFactor > 0 ? pro100g * scaleFactor : pro100g);
+    const carbServing = getServingValue("carbohydrates")|| (scaleFactor > 0 ? carb100g * scaleFactor : carb100g);
+    const fatServing  = getServingValue("fat")          || (scaleFactor > 0 ? fat100g * scaleFactor : fat100g);
+    const sugarServing= getServingValue("sugars")       || (scaleFactor > 0 ? sugar100g * scaleFactor : sugar100g);
+
     return {
       name: String(product.product_name_en || product.product_name || "Unknown Product"),
-      calories: Math.max(0, Math.round(caloriesFromKcal || (caloriesFromKj ? caloriesFromKj / 4.184 : 0))),
-      protein: Math.max(0, Math.round(getPer100gValue(nutriments, "proteins"))),
-      carbs: Math.max(0, Math.round(getPer100gValue(nutriments, "carbohydrates"))),
-      fat: Math.max(0, Math.round(getPer100gValue(nutriments, "fat"))),
-      sugar: Math.max(0, toRounded1(getPer100gValue(nutriments, "sugars"))),
+      calories: Math.max(0, Math.round(calServing)),
+      protein:  Math.max(0, toRounded1(proServing)),
+      carbs:    Math.max(0, toRounded1(carbServing)),
+      fat:      Math.max(0, toRounded1(fatServing)),
+      sugar:    Math.max(0, toRounded1(sugarServing)),
       servingSize,
       servingUnit,
       barcode: normalizedBarcode,

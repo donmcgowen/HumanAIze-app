@@ -41,13 +41,18 @@ async function searchFoodWithGeminiGrounded(query: string, apiKey: string): Prom
   const GEMINI_MODEL = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-  const prompt = `You are a nutrition database expert. Use Google Search to look up the exact nutrition facts for this food or product: "${query}"
+  const prompt = `You are a nutrition database expert. Use Google Search to look up nutrition facts for: "${query}"
 
-Search for the official product page, nutrition label, or a trusted nutrition database entry.
+Search for official product pages, nutrition labels, and trusted nutrition databases.
 
-Return a JSON object with a "foods" array of up to 5 matching products. Each item must have:
+Return a JSON object with a "foods" array of up to 8 matching products. Prioritize:
+1. The most popular and widely-sold consumer brands (e.g. for "almond milk" return Almond Breeze, Silk, Califia Farms, Oatly, etc.)
+2. Multiple varieties/flavors of the same brand if relevant (Original, Unsweetened, Vanilla, etc.)
+3. Exact product matches if a specific brand is named in the query
+
+Each item must have:
 - name: exact product name including brand and flavor/variety
-- description: brand name, product line, or brief description
+- description: brand name or brief description
 - caloriesPer100g: calories per 100 grams (convert from label if needed)
 - proteinPer100g: protein grams per 100g
 - carbsPer100g: carbohydrates grams per 100g  
@@ -57,20 +62,19 @@ Return a JSON object with a "foods" array of up to 5 matching products. Each ite
 IMPORTANT:
 - All macro values MUST be per 100g (normalize from the label serving size)
 - Use REAL nutrition data from the product label, not estimates
-- If multiple flavors/varieties exist, list the most popular ones
 - Return ONLY valid JSON, no markdown
 
 Example format:
 {
   "foods": [
     {
-      "name": "Post Premier Protein High Protein Cereal, Cinnamon Crunch",
-      "description": "Post Consumer Brands",
-      "caloriesPer100g": 367,
-      "proteinPer100g": 33.3,
-      "carbsPer100g": 46.7,
-      "fatPer100g": 3.3,
-      "servingSize": "60g (2/3 cup)"
+      "name": "Almond Breeze Almondmilk Original",
+      "description": "Blue Diamond Growers",
+      "caloriesPer100g": 17,
+      "proteinPer100g": 0.4,
+      "carbsPer100g": 1.7,
+      "fatPer100g": 1.0,
+      "servingSize": "1 cup (240ml)"
     }
   ]
 }`;
@@ -131,7 +135,7 @@ Example format:
       servingSize: f.servingSize ? String(f.servingSize).trim() : undefined,
     }))
     .filter(f => f.caloriesPer100g > 0 || f.proteinPer100g > 0)
-    .slice(0, 5);
+    .slice(0, 8);
 }
 
 /**

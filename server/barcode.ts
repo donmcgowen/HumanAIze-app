@@ -22,6 +22,8 @@ interface BarcodeProduct {
   proteinPer100g?: number;
   carbsPer100g?: number;
   fatPer100g?: number;
+  /** Weight in grams of 1 serving unit (for live macro preview scaling) */
+  servingWeightPerUnit?: number;
 }
 
 /**
@@ -123,21 +125,27 @@ export async function lookupBarcodeProduct(barcode: string): Promise<BarcodeProd
         ? (servingSizeNum * 28.3495) / 100
         : servingSizeNum / 100;
 
+      // servingWeightPerUnit: weight in grams of 1 serving (for live preview scaling)
+      const offServingInGrams = servingUnitStr.toLowerCase() === "oz"
+        ? servingSizeNum * 28.3495
+        : servingSizeNum; // ml treated as g for nutrition purposes
+
       return {
         name: offProduct.name,
         calories: Math.round(offProduct.calories),
-        protein: Math.round(offProduct.protein),
-        carbs: Math.round(offProduct.carbs),
-        fat: Math.round(offProduct.fat),
-        sugar: Math.round(offProduct.sugar),
+        protein: Math.round(offProduct.protein * 10) / 10,
+        carbs: Math.round(offProduct.carbs * 10) / 10,
+        fat: Math.round(offProduct.fat * 10) / 10,
+        sugar: Math.round(offProduct.sugar * 10) / 10,
         servingSize: offProduct.servingSize,
         servingUnit: offProduct.servingUnit,
         barcode: offProduct.barcode,
         brand: offProduct.brand,
         caloriesPer100g: scaleFactor > 0 ? Math.round(offProduct.calories / scaleFactor) : offProduct.calories,
-        proteinPer100g: scaleFactor > 0 ? Math.round((offProduct.protein / scaleFactor) * 10) / 10 : offProduct.protein,
-        carbsPer100g: scaleFactor > 0 ? Math.round((offProduct.carbs / scaleFactor) * 10) / 10 : offProduct.carbs,
-        fatPer100g: scaleFactor > 0 ? Math.round((offProduct.fat / scaleFactor) * 10) / 10 : offProduct.fat,
+        proteinPer100g:  scaleFactor > 0 ? Math.round((offProduct.protein  / scaleFactor) * 10) / 10 : offProduct.protein,
+        carbsPer100g:    scaleFactor > 0 ? Math.round((offProduct.carbs    / scaleFactor) * 10) / 10 : offProduct.carbs,
+        fatPer100g:      scaleFactor > 0 ? Math.round((offProduct.fat      / scaleFactor) * 10) / 10 : offProduct.fat,
+        servingWeightPerUnit: offServingInGrams > 0 ? offServingInGrams : undefined,
       };
     }
   } catch (error) {
@@ -172,9 +180,10 @@ export async function lookupBarcodeProduct(barcode: string): Promise<BarcodeProd
         barcode: numericBarcode,
         brand: food.brand || undefined,
         caloriesPer100g: factor > 0 ? Math.round(food.calories / factor) : food.calories,
-        proteinPer100g: factor > 0 ? food.proteinGrams / factor : food.proteinGrams,
-        carbsPer100g: factor > 0 ? food.carbsGrams / factor : food.carbsGrams,
-        fatPer100g: factor > 0 ? food.fatGrams / factor : food.fatGrams,
+        proteinPer100g:  factor > 0 ? food.proteinGrams / factor : food.proteinGrams,
+        carbsPer100g:    factor > 0 ? food.carbsGrams / factor : food.carbsGrams,
+        fatPer100g:      factor > 0 ? food.fatGrams / factor : food.fatGrams,
+        servingWeightPerUnit: servingInGrams > 0 ? servingInGrams : undefined,
       };
     }
   } catch (error) {

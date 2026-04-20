@@ -1378,20 +1378,24 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           console.log(`[Food Search] DB cache quality check failed for "${normalizedQuery}" — bypassing stale cache`);
         }
 
-        // 3. Cache miss — search USDA Branded + Open Food Facts IN PARALLEL (best sources for branded products)
-        console.log(`[Food Search] Cache miss for query: "${normalizedQuery}" - searching USDA Branded + Open Food Facts in parallel`);
+        // 3. Cache miss — search USDA Branded + Open Food Facts + Gemini ALL IN PARALLEL
+        // Running Gemini in parallel (not just as fallback) ensures popular brands always appear
+        // even when USDA/OFF return only obscure or generic entries for common food terms.
+        console.log(`[Food Search] Cache miss for query: "${normalizedQuery}" - searching USDA Branded + Open Food Facts + Gemini in parallel`);
 
         let results: FoodResult[] = [];
         let resultSource: "branded" | "open_food_facts" | "gemini" | "usda_generic" = "usda_generic";
 
-        // Run USDA Branded and Open Food Facts searches in parallel
-        const [usdaBrandedResults, offResults] = await Promise.allSettled([
+        // Run all three sources in parallel
+        const [usdaBrandedResults, offResults, geminiParallelResults] = await Promise.allSettled([
           searchUSDABrandedFoods(normalizedQuery, 20),
           searchOpenFoodFactsByName(normalizedQuery, 15),
+          searchFoodWithGemini(normalizedQuery),
         ]);
 
         const brandedFoods = usdaBrandedResults.status === "fulfilled" ? usdaBrandedResults.value : [];
-        const offFoods = offResults.status === "fulfilled" ? offResults.value : [];
+        const offFoods     = offResults.status === "fulfilled"          ? offResults.value          : [];
+        const geminiFoods  = geminiParallelResults.status === "fulfilled" ? geminiParallelResults.value : [];
 
         if (usdaBrandedResults.status === "rejected") {
           console.warn(`[Food Search] USDA Branded failed for "${normalizedQuery}"`, usdaBrandedResults.reason);
@@ -1399,32 +1403,45 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
         if (offResults.status === "rejected") {
           console.warn(`[Food Search] Open Food Facts failed for "${normalizedQuery}"`, offResults.reason);
         }
+        if (geminiParallelResults.status === "rejected") {
+          console.warn(`[Food Search] Gemini parallel search failed for "${normalizedQuery}"`, geminiParallelResults.reason);
+        }
 
-        // Merge results: interleave USDA Branded and OFF results, deduplicating by name
-        // Apply relevance scoring so exact/close matches appear first
-        if (brandedFoods.length > 0 || offFoods.length > 0) {
+        // Merge results from all three sources with relevance scoring.
+        // Strategy: Gemini results for popular/branded items get a +15 score bonus
+        // so they surface above generic USDA entries for common food category searches.
+        if (brandedFoods.length > 0 || offFoods.length > 0 || geminiFoods.length > 0) {
           const seen = new Set<string>();
           const merged: (FoodResult & { _score: number })[] = [];
           const queryLower = normalizedQuery.toLowerCase();
           const queryWords = queryLower.split(/\s+/).filter(w => w.length > 1);
 
-          const scoreFood = (name: string): number => {
+          const scoreFood = (name: string, bonus = 0): number => {
             const nameLower = name.toLowerCase();
             // Exact match
             if (nameLower === queryLower) return 100;
             // Starts with full query
-            if (nameLower.startsWith(queryLower)) return 90;
+            if (nameLower.startsWith(queryLower)) return 90 + bonus;
             // Contains full query as substring
-            if (nameLower.includes(queryLower)) return 80;
+            if (nameLower.includes(queryLower)) return 80 + bonus;
             // All query words present
             const allWords = queryWords.every(w => nameLower.includes(w));
-            if (allWords) return 70;
+            if (allWords) return 70 + bonus;
             // Most query words present
             const matchCount = queryWords.filter(w => nameLower.includes(w)).length;
-            return Math.round((matchCount / queryWords.length) * 60);
+            return Math.round((matchCount / queryWords.length) * 60) + bonus;
           };
 
-          // Add USDA branded results first (they have serving size info)
+          // Add Gemini results FIRST with a +15 bonus (they represent popular/well-known brands)
+          for (const food of mapGeminiResults(geminiFoods)) {
+            const key = food.name.toLowerCase().trim();
+            if (!seen.has(key)) {
+              seen.add(key);
+              merged.push({ ...food, _score: scoreFood(food.name, 15) });
+            }
+          }
+
+          // Add USDA branded results (they have serving size info)
           for (const food of mapUsdaResults(brandedFoods)) {
             const key = food.name.toLowerCase().trim();
             if (!seen.has(key)) {
@@ -1451,45 +1468,25 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
             }
           }
 
-          // Sort by relevance score descending, then take top 5
+          // Sort by relevance score descending, then take top 8 (more variety for user)
           merged.sort((a, b) => b._score - a._score);
           const topScore = merged[0]?._score ?? 0;
-          results = merged.slice(0, 5).map(({ _score, ...food }) => food);
-          resultSource = "branded";
-          console.log(`[Food Search] Branded search found ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length}, top5 selected, topScore: ${topScore})`);
-
-          // If the best match score is very low (< 30), the databases didn't find a good match.
-          // Try Gemini internet search to supplement with better results.
-          if (topScore < 30) {
-            console.log(`[Food Search] Low relevance scores (best: ${topScore}) — trying Gemini internet search for better matches`);
-            try {
-              const geminiResults = await searchFoodWithGemini(normalizedQuery);
-              if (geminiResults.length > 0) {
-                const geminiMapped = mapGeminiResults(geminiResults).slice(0, 3);
-                // Merge: Gemini first, then remaining DB results (deduped by name)
-                const existingNames = new Set(geminiMapped.map(r => r.name.toLowerCase()));
-                const remainingDb = results.filter(r => !existingNames.has(r.name.toLowerCase()));
-                results = [...geminiMapped, ...remainingDb].slice(0, 5);
-                resultSource = "gemini";
-                console.log(`[Food Search] Gemini supplemented results: ${geminiMapped.length} Gemini + ${remainingDb.length} DB = ${results.length} total`);
-              }
-            } catch (err) {
-              console.warn(`[Food Search] Gemini supplement search failed:`, err);
-            }
-          }
+          results = merged.slice(0, 8).map(({ _score, ...food }) => food);
+          resultSource = geminiFoods.length > 0 ? "gemini" : "branded";
+          console.log(`[Food Search] Merged search: ${results.length} results for "${normalizedQuery}" (USDA: ${brandedFoods.length}, OFF: ${offFoods.length}, Gemini: ${geminiFoods.length}, topScore: ${topScore})`);
         }
 
-        // 4. If no branded results, try Gemini AI (with Google Search grounding for internet lookup)
+        // 4. If still no results, try Gemini alone as last resort before USDA generic
         if (results.length === 0) {
           try {
-            console.log(`[Food Search] No branded results — trying Gemini internet search for "${normalizedQuery}"`);
+            console.log(`[Food Search] No results from any source — retrying Gemini for "${normalizedQuery}"`);
             const geminiResults = await searchFoodWithGemini(normalizedQuery);
-            results = mapGeminiResults(geminiResults).slice(0, 5);
+            results = mapGeminiResults(geminiResults).slice(0, 8);
             if (results.length > 0) {
               resultSource = "gemini";
             }
           } catch (error) {
-            console.warn(`[Food Search] Gemini failed for query: "${normalizedQuery}"`, error);
+            console.warn(`[Food Search] Gemini retry failed for query: "${normalizedQuery}"`, error);
           }
         }
 
