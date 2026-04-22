@@ -1500,7 +1500,10 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
             await saveLocalCachedFood(normalizedQuery, mapped, "branded");
             return mapped;
           }
-          console.log(`[Food Search] DB cache quality check failed for "${normalizedQuery}" (branded: ${isBrandedSearch}) — bypassing stale cache`);
+          // Cache has stale/wrong-brand results — delete from DB too by overwriting with empty
+          console.log(`[Food Search] DB cache quality check failed for "${normalizedQuery}" (branded: ${isBrandedSearch}) — clearing stale DB + local cache`);
+          await clearLocalCachedFood(normalizedQuery);
+          // Proceed to Gemini to get fresh correct results (they will overwrite the DB cache at the end)
         }
 
         // 3. Cache miss — Gemini AI is the PRIMARY source for ALL searches.
@@ -1515,9 +1518,19 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
         try {
           const geminiResults = await searchFoodWithGemini(normalizedQuery);
           if (geminiResults.length > 0) {
-            results = mapGeminiResults(geminiResults).slice(0, 8);
+            let mapped = mapGeminiResults(geminiResults);
+            // For branded queries: filter out any results that don't contain the brand word
+            if (isBrandedSearch) {
+              const brandFiltered = mapped.filter(r =>
+                r.name.toLowerCase().includes(cacheFirstWord) ||
+                r.description.toLowerCase().includes(cacheFirstWord)
+              );
+              // Only apply brand filter if it leaves at least 1 result
+              if (brandFiltered.length > 0) mapped = brandFiltered;
+            }
+            results = mapped.slice(0, 8);
             resultSource = "gemini";
-            console.log(`[Food Search] Gemini returned ${results.length} results for "${normalizedQuery}"`);
+            console.log(`[Food Search] Gemini returned ${results.length} results for "${normalizedQuery}" (branded filter: ${isBrandedSearch})`);
           }
         } catch (error) {
           console.warn(`[Food Search] Gemini search failed for "${normalizedQuery}"`, error);
@@ -1615,6 +1628,53 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
 
         return results;
       }),
+
+    // Fast Gemini-powered autocomplete — triggers after first word, returns quick suggestions
+    autocomplete: publicProcedure
+      .input(z.object({ query: z.string().min(1) }))
+      .query(async ({ input }) => {
+        const q = input.query.trim();
+        if (!q || q.split(/\s+/).length < 1) return [];
+
+        // Check local file cache first for instant response
+        const localCached = await getLocalCachedFood(q);
+        if (localCached && localCached.length > 0) {
+          return localCached.slice(0, 5).map(r => ({ name: r.name, description: r.description, calories: r.caloriesPer100g }));
+        }
+
+        // Use Gemini with a fast, minimal prompt for autocomplete suggestions
+        try {
+          const { GoogleGenerativeAI } = await import("@google/generative-ai");
+          const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+          const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+          const words = q.toLowerCase().split(/\s+/);
+          const firstWord = words[0];
+          const genericTerms = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","apple","orange","broccoli","spinach","carrot","potato","tomato","onion","garlic","salmon","tuna","turkey","shrimp","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","blueberry","mango"]);
+          const isBrand = words.length >= 1 && !genericTerms.has(firstWord);
+
+          const brandInstruction = isBrand
+            ? `CRITICAL: The user is searching for the brand "${firstWord}". Return ONLY products from the ${firstWord} brand. Do NOT suggest products from any other brand.`
+            : "";
+
+          const prompt = `You are a food nutrition autocomplete assistant. The user has typed: "${q}"
+${brandInstruction}
+Return 5 food product name suggestions that match this query. For each, provide the product name and approximate calories per 100g.
+Respond ONLY with a JSON array, no markdown:
+[{"name": "Product Name", "description": "Brand or brief description", "calories": 150}]`;
+
+          const result = await model.generateContent(prompt);
+          const text = result.response.text().trim().replace(/^```json\n?|^```\n?|\n?```$/g, "");
+          const suggestions = JSON.parse(text);
+          if (Array.isArray(suggestions)) {
+            return suggestions.slice(0, 5);
+          }
+        } catch (e) {
+          // Autocomplete failure is silent
+        }
+        return [];
+      }),
+
     calculateServingMacros: publicProcedure
       .input(
         z.object({

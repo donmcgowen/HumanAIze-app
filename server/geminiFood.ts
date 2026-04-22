@@ -49,7 +49,7 @@ async function searchFoodWithGeminiGrounded(query: string, apiKey: string): Prom
 
   const brandInstruction = isBrandedQuery
     ? `CRITICAL: The query "${query}" contains a specific brand name ("${queryWords[0]}"). You MUST return ONLY products from the "${queryWords[0]}" brand. Do NOT return products from any other brand. If you cannot find "${queryWords[0]}" products, return an empty foods array rather than returning a different brand.`
-    : `Return the most popular and widely-sold consumer brands for this food type. Include multiple brands and varieties.`;
+    : `This is a GENERIC food query. Return the TOP 5 most popular and widely-sold consumer brands for "${query}" in the United States. For example, for "chocolate milk" return brands like Nestle, Hershey, Horizon, TruMoo, Fairlife — NOT generic entries. Each result must include the brand name in the "name" field (e.g. "Nestle Nesquik Chocolate Milk", "Hershey's Chocolate Milk"). Sort by brand popularity/market share.`;
 
   const prompt = `You are a nutrition database expert. Use Google Search to look up nutrition facts for: "${query}"
 
@@ -60,7 +60,7 @@ ${brandInstruction}
 Return a JSON object with a "foods" array of up to 8 matching products.
 
 Each item must have:
-- name: exact product name including brand and flavor/variety
+- name: exact product name including brand and flavor/variety (ALWAYS include brand name)
 - description: brand name or brief description
 - caloriesPer100g: calories per 100 grams (convert from label if needed)
 - proteinPer100g: protein grams per 100g
@@ -71,18 +71,19 @@ Each item must have:
 IMPORTANT:
 - All macro values MUST be per 100g (normalize from the label serving size)
 - Use REAL nutrition data from the product label, not estimates
+- NEVER return a generic/unbranded result for a product that has well-known brands
 - Return ONLY valid JSON, no markdown
 
 Example format:
 {
   "foods": [
     {
-      "name": "Almond Breeze Almondmilk Original",
-      "description": "Blue Diamond Growers",
-      "caloriesPer100g": 17,
-      "proteinPer100g": 0.4,
-      "carbsPer100g": 1.7,
-      "fatPer100g": 1.0,
+      "name": "Nestle Nesquik Chocolate Milk",
+      "description": "Nestle",
+      "caloriesPer100g": 67,
+      "proteinPer100g": 3.3,
+      "carbsPer100g": 11.3,
+      "fatPer100g": 1.4,
       "servingSize": "1 cup (240ml)"
     }
   ]

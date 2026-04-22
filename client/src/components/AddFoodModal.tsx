@@ -197,18 +197,45 @@ function parseServingWeightG(servingSize?: string): number | undefined {
   return undefined;
 }
 
+// Generic food terms that are NOT brand names
+const GENERIC_FOOD_TERMS = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","apple","orange","broccoli","spinach","carrot","potato","tomato","onion","garlic","salmon","tuna","turkey","shrimp","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","blueberry","mango","granola","cereal","soup","salad","sandwich","pizza","burger","fries","steak","bacon","sausage","ham","tofu","tempeh","lentils","beans","avocado","hummus","protein","whey","creatine"]);
+
+function isGenericQuery(query: string): boolean {
+  const words = query.trim().toLowerCase().split(/\s+/);
+  // A query is generic if ALL words are generic food terms (no brand word)
+  return words.every(w => GENERIC_FOOD_TERMS.has(w));
+}
+
 function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [autocompleteQuery, setAutocompleteQuery] = useState("");
+  const [showAutocomplete, setShowAutocomplete] = useState(false);
+  const [brandFilter, setBrandFilter] = useState<string | null>(null);
   const [selectedFood, setSelectedFood] = useState<any>(null);
   const [servingAmount, setServingAmount] = useState("100");
   const [servingUnit, setServingUnit] = useState<string>("g");
   const [servingWeightG, setServingWeightG] = useState<number | undefined>(undefined);
 
-  // Debounce: wait 500ms after user stops typing before searching
+  // Debounce for main search: 400ms
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(searchQuery), 500);
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+      setBrandFilter(null); // reset brand filter on new search
+    }, 400);
     return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Debounce for autocomplete: 250ms, triggers after first word
+  useEffect(() => {
+    const words = searchQuery.trim().split(/\s+/).filter(Boolean);
+    if (words.length >= 1 && searchQuery.trim().length >= 2) {
+      const timer = setTimeout(() => setAutocompleteQuery(searchQuery.trim()), 250);
+      return () => clearTimeout(timer);
+    } else {
+      setAutocompleteQuery("");
+      setShowAutocomplete(false);
+    }
   }, [searchQuery]);
 
   // Fetch recently logged foods for quick re-use
@@ -223,9 +250,18 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
       ).slice(0, 8)
     : [];
 
+  // Effective query: if brand filter applied, prepend brand to query
+  const effectiveQuery = brandFilter ? `${brandFilter} ${debouncedQuery}` : debouncedQuery;
+
   const { data: foodVariations, isLoading, error } = trpc.food.searchWithAI.useQuery(
-    { query: debouncedQuery },
-    { enabled: debouncedQuery.trim().length > 2, retry: 1 }
+    { query: effectiveQuery },
+    { enabled: effectiveQuery.trim().length > 2, retry: 1 }
+  );
+
+  // Autocomplete suggestions (fast, lightweight)
+  const { data: autocompleteSuggestions } = trpc.food.autocomplete.useQuery(
+    { query: autocompleteQuery },
+    { enabled: autocompleteQuery.length >= 2 && showAutocomplete }
   );
 
   // Search through all previously logged foods by query
@@ -233,6 +269,30 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
     { query: debouncedQuery },
     { enabled: debouncedQuery.trim().length > 2 }
   );
+
+  // Auto-resolve: if history has an exact match for the query, auto-select it
+  useEffect(() => {
+    if (!historyMatches || historyMatches.length === 0 || selectedFood) return;
+    const queryLower = debouncedQuery.trim().toLowerCase();
+    const exactMatch = historyMatches.find((h: any) => h.foodName.toLowerCase() === queryLower);
+    if (exactMatch) {
+      handleSelectRecentFood(exactMatch);
+    }
+  }, [historyMatches, debouncedQuery]);
+
+  // Determine if this is a generic query (needs brand clarification)
+  const showBrandClarification = !brandFilter && !isLoading && foodVariations && foodVariations.length > 0 && isGenericQuery(debouncedQuery);
+
+  // Extract unique brands from results for the clarification chips
+  const brandChips: string[] = showBrandClarification
+    ? Array.from(new Set(
+        (foodVariations || []).map((f: any) => {
+          const desc = f.description || "";
+          // Brand is usually the first part of description before " - "
+          return desc.split(" - ")[0].trim() || f.name.split(" ")[0];
+        }).filter((b: string) => b.length > 1)
+      )).slice(0, 6) as string[]
+    : [];
 
   // When searching, mark which results match recent foods
   const recentFoodNames = new Set(recentFoods.map((f: any) => f.foodName.toLowerCase()));
@@ -348,25 +408,79 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
 
   return (
     <div className="space-y-4">
-      {/* Search input */}
+      {/* Search input with autocomplete */}
       <div className="space-y-2">
         <Label htmlFor="search-food">Search Foods</Label>
-        <Input
-          id="search-food"
-          placeholder="e.g., Premier Protein Cereal, greek yogurt..."
-          value={searchQuery}
-          onChange={(e) => { setSearchQuery(e.target.value); setSelectedFood(null); }}
-          className="w-full"
-          autoFocus
-        />
+        <div className="relative">
+          <Input
+            id="search-food"
+            placeholder="e.g., Oberweis chocolate milk, Premier Protein..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setSelectedFood(null);
+              setShowAutocomplete(true);
+            }}
+            onFocus={() => setShowAutocomplete(true)}
+            onBlur={() => setTimeout(() => setShowAutocomplete(false), 200)}
+            className="w-full"
+            autoFocus
+          />
+          {/* Autocomplete dropdown */}
+          {showAutocomplete && autocompleteSuggestions && autocompleteSuggestions.length > 0 && !selectedFood && (
+            <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-md shadow-lg overflow-hidden">
+              {autocompleteSuggestions.map((s: any, i: number) => (
+                <button
+                  key={i}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800 flex justify-between items-center border-b border-gray-800 last:border-0"
+                  onMouseDown={() => {
+                    setSearchQuery(s.name);
+                    setShowAutocomplete(false);
+                  }}
+                >
+                  <span className="font-medium truncate">{s.name}</span>
+                  {s.calories > 0 && (
+                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{Math.round(s.calories)} cal/100g</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <p className="text-xs text-gray-500">
           {debouncedQuery.trim().length <= 2
-            ? "Type to search branded products, or pick a recent food below"
+            ? "Type a food or brand name — results update as you type"
             : isLoading
-              ? "Searching products database and internet..."
-              : "Search any food, brand, or supplement"}
+              ? "Searching with Gemini AI..."
+              : brandFilter
+                ? `Showing ${brandFilter} results`
+                : "Search any food, brand, or supplement"}
         </p>
       </div>
+
+      {/* Brand clarification prompt for generic queries */}
+      {showBrandClarification && brandChips.length > 0 && !selectedFood && (
+        <div className="p-3 bg-cyan-500/10 border border-cyan-500/30 rounded-lg space-y-2">
+          <p className="text-xs text-cyan-300 font-medium">Which brand are you looking for?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {brandChips.map((brand, i) => (
+              <button
+                key={i}
+                onClick={() => setBrandFilter(brand)}
+                className="px-2.5 py-1 text-xs bg-gray-800 hover:bg-cyan-600 border border-gray-600 hover:border-cyan-500 rounded-full transition-colors"
+              >
+                {brand}
+              </button>
+            ))}
+            <button
+              onClick={() => setBrandFilter("skip")}
+              className="px-2.5 py-1 text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 rounded-full transition-colors"
+            >
+              Show all
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Loading state */}
       {isLoading && (
