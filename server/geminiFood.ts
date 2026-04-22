@@ -41,14 +41,23 @@ async function searchFoodWithGeminiGrounded(query: string, apiKey: string): Prom
   const GEMINI_MODEL = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
+  // Detect if the query contains a specific brand name (first word is capitalized / not a generic food word)
+  const genericFoodWords = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","apple","orange","broccoli","spinach","carrot","potato","tomato","onion","garlic","salmon","tuna","turkey","shrimp","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","blueberry","mango"]);
+  const queryWords = query.trim().split(/\s+/);
+  const firstWord = queryWords[0].toLowerCase();
+  const isBrandedQuery = queryWords.length >= 2 && !genericFoodWords.has(firstWord);
+
+  const brandInstruction = isBrandedQuery
+    ? `CRITICAL: The query "${query}" contains a specific brand name ("${queryWords[0]}"). You MUST return ONLY products from the "${queryWords[0]}" brand. Do NOT return products from any other brand. If you cannot find "${queryWords[0]}" products, return an empty foods array rather than returning a different brand.`
+    : `Return the most popular and widely-sold consumer brands for this food type. Include multiple brands and varieties.`;
+
   const prompt = `You are a nutrition database expert. Use Google Search to look up nutrition facts for: "${query}"
 
 Search for official product pages, nutrition labels, and trusted nutrition databases.
 
-Return a JSON object with a "foods" array of up to 8 matching products. Prioritize:
-1. The most popular and widely-sold consumer brands (e.g. for "almond milk" return Almond Breeze, Silk, Califia Farms, Oatly, etc.)
-2. Multiple varieties/flavors of the same brand if relevant (Original, Unsweetened, Vanilla, etc.)
-3. Exact product matches if a specific brand is named in the query
+${brandInstruction}
+
+Return a JSON object with a "foods" array of up to 8 matching products.
 
 Each item must have:
 - name: exact product name including brand and flavor/variety
