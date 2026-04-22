@@ -137,6 +137,17 @@ function AIWorkoutPlanView({
         )}
       </div>
 
+      {/* Nutrition note */}
+      {(plan as any).nutritionNote && (
+        <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-3 flex gap-2">
+          <Zap className="h-4 w-4 text-green-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-xs font-semibold text-green-400 mb-1">Pre-Workout Nutrition</p>
+            <p className="text-xs text-slate-300">{(plan as any).nutritionNote}</p>
+          </div>
+        </div>
+      )}
+
       {/* Safety notes */}
       {plan.safetyNotes && plan.safetyNotes.length > 0 && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 flex gap-2">

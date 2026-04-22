@@ -2104,10 +2104,23 @@ Be specific and practical. Return JSON only.`;
         })
       )
       .mutation(async ({ ctx, input }) => {
-        const [profile, recentWorkouts] = await Promise.all([
+        // Get today's date range (local midnight to midnight)
+        const now = Date.now();
+        const todayStart = now - (now % 86400000); // approximate UTC day start
+        const todayEnd = todayStart + 86400000;
+
+        const [profile, recentWorkouts, todayFoodLogs] = await Promise.all([
           getUserProfile(ctx.user.id),
           getWorkoutEntries(ctx.user.id, 14),
+          getFoodLogsForDay(ctx.user.id, todayStart, todayEnd),
         ]);
+
+        // Sum today's macros
+        const todayCalories = todayFoodLogs.reduce((sum, f) => sum + (f.calories || 0), 0);
+        const todayProtein = todayFoodLogs.reduce((sum, f) => sum + (f.proteinGrams || 0), 0);
+        const todayCarbs = todayFoodLogs.reduce((sum, f) => sum + (f.carbsGrams || 0), 0);
+        const todayFat = todayFoodLogs.reduce((sum, f) => sum + (f.fatGrams || 0), 0);
+        const hasFoodData = todayFoodLogs.length > 0;
 
         const { generateAIWorkoutPlan } = await import("./geminiWorkout");
         const plan = await generateAIWorkoutPlan({
@@ -2127,6 +2140,13 @@ Be specific and practical. Return JSON only.`;
             recordedAt: w.recordedAt,
           })),
           customRequest: input.customRequest,
+          // Today's food log for pre-workout nutrition advice
+          todayCalories: hasFoodData ? todayCalories : undefined,
+          todayProtein: hasFoodData ? todayProtein : undefined,
+          todayCarbs: hasFoodData ? todayCarbs : undefined,
+          todayFat: hasFoodData ? todayFat : undefined,
+          dailyCalorieTarget: profile?.dailyCalorieTarget ?? undefined,
+          dailyProteinTarget: profile?.dailyProteinTarget ?? undefined,
         });
 
         return plan;
