@@ -197,6 +197,71 @@ function parseServingWeightG(servingSize?: string): number | undefined {
   return undefined;
 }
 
+/**
+ * Compute calories for ONE full default serving of a food item.
+ * food.caloriesPer100g is per 100g; food.servingSize is the label serving (e.g. "2 scoops (82g)", "1 cup (240ml)", "55g").
+ * Returns { calories, label } where label is e.g. "310 cal / 2 scoops" or "150 cal / 1 cup".
+ */
+function getServingDisplay(food: { caloriesPer100g: number; servingSize?: string }): { calories: number; label: string } {
+  const { caloriesPer100g, servingSize } = food;
+
+  if (!servingSize) {
+    return { calories: Math.round(caloriesPer100g), label: `${Math.round(caloriesPer100g)} cal/100g` };
+  }
+
+  const s = servingSize.trim();
+
+  // --- Pattern: "2 scoops (82g)" or "1 cup (240ml)" or "3 pieces (45g)" ---
+  // Capture: count + unit + grams in parens
+  const countUnitGrams = s.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z\s]+?)\s*\((\d+(?:\.\d+)?)\s*(?:g|ml|mL)\)/i);
+  if (countUnitGrams) {
+    const count = parseFloat(countUnitGrams[1]);
+    const unit = countUnitGrams[2].trim().replace(/s$/, ""); // singularize
+    const weightG = parseFloat(countUnitGrams[3]);
+    const cal = Math.round((caloriesPer100g / 100) * weightG);
+    const unitLabel = count === 1 ? `1 ${unit}` : `${count} ${unit}s`;
+    return { calories: cal, label: `${cal} cal / ${unitLabel}` };
+  }
+
+  // --- Pattern: "82g" or "240ml" (direct weight) ---
+  const directG = s.match(/^(\d+(?:\.\d+)?)\s*(g|ml|mL)$/i);
+  if (directG) {
+    const weightG = parseFloat(directG[1]);
+    const unit = directG[2].toLowerCase() === 'ml' ? 'ml' : 'g';
+    const cal = Math.round((caloriesPer100g / 100) * weightG);
+    return { calories: cal, label: `${cal} cal / ${weightG}${unit}` };
+  }
+
+  // --- Pattern: "1.87 oz" ---
+  const ozMatch = s.match(/^(\d+(?:\.\d+)?)\s*oz$/i);
+  if (ozMatch) {
+    const weightG = parseFloat(ozMatch[1]) * 28.35;
+    const cal = Math.round((caloriesPer100g / 100) * weightG);
+    return { calories: cal, label: `${cal} cal / ${ozMatch[1]} oz` };
+  }
+
+  // --- Pattern: "1 cup" or "1 tbsp" (volume without gram weight — use common conversions) ---
+  const volumeMap: Record<string, number> = {
+    cup: 240, cups: 240, "fl oz": 30, "fl. oz": 30, tbsp: 15, tsp: 5,
+    ml: 1, mL: 1, liter: 1000, litre: 1000,
+  };
+  const volumeMatch = s.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z\s.]+)$/i);
+  if (volumeMatch) {
+    const count = parseFloat(volumeMatch[1]);
+    const unitRaw = volumeMatch[2].trim().toLowerCase();
+    const mlPerUnit = volumeMap[unitRaw];
+    if (mlPerUnit) {
+      const weightG = count * mlPerUnit; // ml ≈ g for water-based liquids
+      const cal = Math.round((caloriesPer100g / 100) * weightG);
+      const unitLabel = count === 1 ? unitRaw.replace(/s$/, "") : unitRaw;
+      return { calories: cal, label: `${cal} cal / ${count} ${unitLabel}` };
+    }
+  }
+
+  // --- Fallback: show per 100g ---
+  return { calories: Math.round(caloriesPer100g), label: `${Math.round(caloriesPer100g)} cal/100g` };
+}
+
 // Generic food terms that are NOT brand names
 const GENERIC_FOOD_TERMS = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","apple","orange","broccoli","spinach","carrot","potato","tomato","onion","garlic","salmon","tuna","turkey","shrimp","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","blueberry","mango","granola","cereal","soup","salad","sandwich","pizza","burger","fries","steak","bacon","sausage","ham","tofu","tempeh","lentils","beans","avocado","hummus","protein","whey","creatine"]);
 
@@ -429,21 +494,22 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
           {/* Autocomplete dropdown */}
           {showAutocomplete && autocompleteSuggestions && autocompleteSuggestions.length > 0 && !selectedFood && (
             <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-gray-900 border border-gray-700 rounded-md shadow-lg overflow-hidden">
-              {autocompleteSuggestions.map((s: any, i: number) => (
-                <button
-                  key={i}
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800 flex justify-between items-center border-b border-gray-800 last:border-0"
-                  onMouseDown={() => {
-                    setSearchQuery(s.name);
-                    setShowAutocomplete(false);
-                  }}
-                >
-                  <span className="font-medium truncate">{s.name}</span>
-                  {s.calories > 0 && (
-                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{Math.round(s.calories)} cal/100g</span>
-                  )}
-                </button>
-              ))}
+              {autocompleteSuggestions.map((s: any, i: number) => {
+                const serving = getServingDisplay({ caloriesPer100g: s.caloriesPer100g ?? s.calories ?? 0, servingSize: s.servingSize });
+                return (
+                  <button
+                    key={i}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800 flex justify-between items-center border-b border-gray-800 last:border-0"
+                    onMouseDown={() => {
+                      setSearchQuery(s.name);
+                      setShowAutocomplete(false);
+                    }}
+                  >
+                    <span className="font-medium truncate">{s.name}</span>
+                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{serving.label}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -586,6 +652,13 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
           <div className="space-y-1.5 max-h-52 overflow-y-auto">
             {foodVariations.map((food: any, idx: number) => {
               const isRecent = recentFoodNames.has(food.name.toLowerCase());
+              const serving = getServingDisplay({ caloriesPer100g: food.caloriesPer100g, servingSize: food.servingSize });
+              // Compute per-serving protein too
+              const servingWeightG = food.servingSize ? (() => {
+                const w = parseServingWeightG(food.servingSize);
+                return w ?? 100;
+              })() : 100;
+              const servingProtein = Math.round((food.proteinPer100g / 100) * servingWeightG * 10) / 10;
               return (
                 <Card
                   key={idx}
@@ -603,10 +676,14 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
                         <p className="font-medium text-sm">{food.name}</p>
                       </div>
                       <p className="text-xs text-gray-400">{food.description}</p>
+                      {food.servingSize && (
+                        <p className="text-xs text-gray-500 mt-0.5">Serving: {food.servingSize}</p>
+                      )}
                     </div>
-                    <div className="text-right text-xs ml-2">
-                      <p className="font-semibold">{Math.round(food.caloriesPer100g)} cal/100g</p>
-                      <p className="text-gray-400">{food.proteinPer100g}g P</p>
+                    <div className="text-right text-xs ml-2 flex-shrink-0">
+                      <p className="font-semibold text-white">{serving.calories} cal</p>
+                      <p className="text-gray-400">{servingProtein}g P</p>
+                      <p className="text-gray-600 text-[10px]">{food.servingSize ? `per serving` : `per 100g`}</p>
                     </div>
                   </div>
                 </Card>
