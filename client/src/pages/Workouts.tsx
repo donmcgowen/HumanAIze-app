@@ -674,12 +674,217 @@ function QuickLogForm({
   );
 }
 
+// ─── Gemini Free-Text Workout Parser Panel ───────────────────────────────────
+
+interface ParsedExercise {
+  name: string;
+  exerciseType: string;
+  muscleGroup: string;
+  sets: number | null;
+  reps: number | null;
+  weightLbs: number | null;
+  durationMins: number;
+  caloriesBurned: number;
+  intensity: "light" | "moderate" | "intense";
+  notes: string;
+}
+
+interface ParsedWorkout {
+  summary: string;
+  workoutLocation: string;
+  totalDurationMins: number;
+  totalCaloriesBurned: number;
+  exercises: ParsedExercise[];
+}
+
+function WorkoutTextParser({ selectedDate, onLogged }: { selectedDate: Date; onLogged: () => void }) {
+  const [text, setText] = useState("");
+  const [parsed, setParsed] = useState<ParsedWorkout | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const parseMutation = trpc.workouts.parseFromText.useMutation({
+    onSuccess: (data) => setParsed(data as ParsedWorkout),
+    onError: (e) => toast.error(e.message || "Failed to parse workout"),
+  });
+
+  const addEntryMutation = trpc.workouts.addEntry.useMutation();
+
+  const handleParse = () => {
+    if (!text.trim()) return;
+    setParsed(null);
+    parseMutation.mutate({ text: text.trim() });
+  };
+
+  const handleConfirm = async () => {
+    if (!parsed) return;
+    setSaving(true);
+    const noon = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 12).getTime();
+    try {
+      for (const ex of parsed.exercises) {
+        await addEntryMutation.mutateAsync({
+          exerciseName: ex.name,
+          exerciseType: ex.exerciseType,
+          durationMinutes: ex.durationMins,
+          caloriesBurned: ex.caloriesBurned,
+          intensity: ex.intensity,
+          notes: ex.notes || undefined,
+          recordedAt: noon,
+        });
+      }
+      toast.success(`Logged ${parsed.exercises.length} exercise${parsed.exercises.length !== 1 ? "s" : ""}!`);
+      setText("");
+      setParsed(null);
+      onLogged();
+    } catch (e) {
+      toast.error("Failed to save some exercises");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const exerciseTypeColor = (type: string) => {
+    const t = type.toLowerCase();
+    if (t === "strength") return "text-cyan-400 bg-cyan-500/10 border-cyan-500/30";
+    if (t === "cardio") return "text-green-400 bg-green-500/10 border-green-500/30";
+    if (t === "hiit") return "text-orange-400 bg-orange-500/10 border-orange-500/30";
+    if (t === "core") return "text-purple-400 bg-purple-500/10 border-purple-500/30";
+    if (t === "flexibility") return "text-blue-400 bg-blue-500/10 border-blue-500/30";
+    return "text-slate-400 bg-slate-500/10 border-slate-500/30";
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <Label className="text-xs text-slate-400 uppercase tracking-wide mb-2 block">
+          Describe Your Workout
+        </Label>
+        <Textarea
+          placeholder={'e.g. "Gym, worked chest and triceps. Bench press 3 sets of 10 at 200 lbs. Dips 3 sets of 10 bodyweight. Cable flyes 3x12 at 40 lbs."'}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={4}
+          className="bg-slate-800/60 border-slate-700 text-white placeholder:text-slate-500 text-sm resize-none"
+        />
+        <p className="text-xs text-slate-500 mt-1">Describe any workout in plain English — Gemini will organize it for you.</p>
+      </div>
+
+      <Button
+        onClick={handleParse}
+        disabled={!text.trim() || parseMutation.isPending}
+        className="w-full h-11 bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white font-semibold"
+      >
+        {parseMutation.isPending ? (
+          <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Analyzing with Gemini...</>
+        ) : (
+          <><Sparkles className="h-4 w-4 mr-2" />Parse &amp; Organize Workout</>
+        )}
+      </Button>
+
+      {/* Parsed preview */}
+      {parsed && (
+        <div className="space-y-3">
+          {/* Summary card */}
+          <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-bold text-white">{parsed.summary}</p>
+                {parsed.workoutLocation && (
+                  <p className="text-xs text-slate-400 mt-0.5">📍 {parsed.workoutLocation}</p>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 text-xs text-slate-400">
+              <span className="flex items-center gap-1"><Timer className="h-3 w-3" />{parsed.totalDurationMins} min total</span>
+              <span className="flex items-center gap-1"><Flame className="h-3 w-3 text-orange-400" />{parsed.totalCaloriesBurned} cal burned</span>
+              <span className="flex items-center gap-1"><Dumbbell className="h-3 w-3 text-cyan-400" />{parsed.exercises.length} exercises</span>
+            </div>
+          </div>
+
+          {/* Exercise list */}
+          <p className="text-xs text-slate-400 uppercase tracking-wide">Exercises Detected</p>
+          <div className="space-y-2">
+            {parsed.exercises.map((ex, i) => (
+              <div key={i} className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-white">{ex.name}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${exerciseTypeColor(ex.exerciseType)}`}>
+                        {ex.exerciseType}
+                      </span>
+                    </div>
+                    {ex.muscleGroup && (
+                      <p className="text-xs text-slate-500 mt-0.5">{ex.muscleGroup}</p>
+                    )}
+                    {/* Sets / reps / weight */}
+                    {(ex.sets || ex.reps || ex.weightLbs) && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {ex.sets && (
+                          <span className="text-xs bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-cyan-300 font-semibold">
+                            {ex.sets} sets
+                          </span>
+                        )}
+                        {ex.reps && (
+                          <span className="text-xs bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-cyan-300 font-semibold">
+                            {ex.reps} reps
+                          </span>
+                        )}
+                        {ex.weightLbs && (
+                          <span className="text-xs bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-yellow-300 font-semibold">
+                            {ex.weightLbs} lbs
+                          </span>
+                        )}
+                        {!ex.weightLbs && ex.notes?.toLowerCase().includes("bodyweight") && (
+                          <span className="text-xs bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-slate-400">
+                            bodyweight
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {ex.notes && !ex.sets && !ex.reps && (
+                      <p className="text-xs text-slate-400 mt-1 italic">{ex.notes}</p>
+                    )}
+                  </div>
+                  <div className="text-right text-xs text-slate-500 shrink-0">
+                    <p>{ex.durationMins}m</p>
+                    {ex.caloriesBurned > 0 && <p className="text-orange-400">{ex.caloriesBurned} cal</p>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Confirm button */}
+          <Button
+            onClick={handleConfirm}
+            disabled={saving}
+            className="w-full h-12 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold"
+          >
+            {saving ? (
+              <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving...</>
+            ) : (
+              <><CheckCircle className="h-4 w-4 mr-2" />Log {parsed.exercises.length} Exercise{parsed.exercises.length !== 1 ? "s" : ""} to {selectedDate.toDateString() === new Date().toDateString() ? "Today" : selectedDate.toLocaleDateString()}</>
+            )}
+          </Button>
+
+          <button
+            onClick={() => { setParsed(null); }}
+            className="w-full text-xs text-slate-500 hover:text-slate-300 py-1"
+          >
+            ✕ Clear and start over
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Workouts Page ───────────────────────────────────────────────────────
 
 export function Workouts() {
   const { data: user, isLoading } = trpc.auth.me.useQuery();
   const [selectedDate, setSelectedDate] = useState(() => new Date());
-  const [activeTab, setActiveTab] = useState<"log" | "ai" | "history">("ai");
+  const [activeTab, setActiveTab] = useState<"log" | "ai" | "text" | "history">("ai");
   const { start: dayStart, end: dayEnd } = useMemo(() => localDayBounds(selectedDate), [selectedDate]);
   const isToday = useMemo(() => selectedDate.toDateString() === new Date().toDateString(), [selectedDate]);
 
@@ -790,6 +995,9 @@ export function Workouts() {
                   <div>
                     <p className="text-sm font-medium text-white">{w.exerciseName}</p>
                     <p className="text-xs text-slate-400">{w.exerciseType} • {w.durationMinutes}m • {w.intensity}</p>
+                    {w.notes && (
+                      <p className="text-xs text-cyan-300/70 mt-0.5">{w.notes}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -810,6 +1018,7 @@ export function Workouts() {
         <div className="flex gap-1 rounded-xl border border-white/10 bg-slate-900/60 p-1">
           {[
             { id: "ai" as const, label: "AI Planner", icon: <Sparkles className="h-4 w-4" /> },
+            { id: "text" as const, label: "Log from Text", icon: <Activity className="h-4 w-4" /> },
             { id: "log" as const, label: "Quick Log", icon: <Plus className="h-4 w-4" /> },
             { id: "history" as const, label: "History", icon: <BarChart3 className="h-4 w-4" /> },
           ].map((tab) => (
@@ -833,6 +1042,9 @@ export function Workouts() {
           <CardContent className="p-5">
             {activeTab === "ai" && (
               <AIWorkoutGenerator onLogWorkout={logWorkoutFromAI} />
+            )}
+            {activeTab === "text" && (
+              <WorkoutTextParser selectedDate={selectedDate} onLogged={refetchDay} />
             )}
             {activeTab === "log" && (
               <QuickLogForm selectedDate={selectedDate} onLogged={refetchDay} />

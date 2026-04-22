@@ -2093,6 +2093,139 @@ Be specific and practical. Return JSON only.`;
         );
       }),
 
+    // ── Gemini Natural Language Workout Parser ───────────────────────────────
+    parseFromText: protectedProcedure
+      .input(
+        z.object({
+          text: z.string().min(5).max(2000),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const profile = await getUserProfile(ctx.user.id);
+        const userWeight = profile?.weightLbs || 170;
+
+        const { GoogleGenerativeAI } = await import("@google/generative-ai");
+        const { ENV } = await import("./_core/env");
+        const genAI = new GoogleGenerativeAI(ENV.geminiApiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+        const prompt = `You are a fitness data parser. The user has described their workout in natural language. Parse it into structured exercise entries.
+
+User's workout description:
+"${input.text}"
+
+User weight: ${userWeight} lbs (for calorie estimation)
+
+Rules:
+1. Extract EVERY distinct exercise mentioned
+2. If sets/reps/weight are mentioned, include them in the notes field (e.g. "3 sets × 10 reps @ 200 lbs")
+3. Estimate calories burned based on exercise type, intensity, and user weight
+4. Estimate duration per exercise if not explicitly stated
+5. Classify exerciseType as one of: Strength, Cardio, HIIT, Flexibility, Sports, Core, Other
+6. Determine intensity: light, moderate, or intense
+7. For the workout summary, describe the overall session in 1-2 sentences
+8. If a location/context is mentioned (e.g. "gym"), include it in the summary
+
+Return ONLY valid JSON with no markdown:
+{
+  "summary": "string (1-2 sentence summary of the full workout session)",
+  "workoutLocation": "string (e.g. 'Gym', 'Home', 'Outdoors', or empty string)",
+  "totalDurationMins": number,
+  "totalCaloriesBurned": number,
+  "exercises": [
+    {
+      "name": "string (exercise name, e.g. 'Bench Press')",
+      "exerciseType": "string (Strength|Cardio|HIIT|Flexibility|Sports|Core|Other)",
+      "muscleGroup": "string (e.g. 'Chest, Triceps')",
+      "sets": number or null,
+      "reps": number or null,
+      "weightLbs": number or null,
+      "durationMins": number,
+      "caloriesBurned": number,
+      "intensity": "light" | "moderate" | "intense",
+      "notes": "string (formatted details, e.g. '3 sets × 10 reps @ 200 lbs' or 'bodyweight')"
+    }
+  ]
+}`;
+
+        try {
+          const result = await model.generateContent(prompt);
+          const text = result.response.text();
+          const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) throw new Error("No JSON in Gemini response");
+
+          const parsed = JSON.parse(jsonMatch[0]) as {
+            summary: string;
+            workoutLocation: string;
+            totalDurationMins: number;
+            totalCaloriesBurned: number;
+            exercises: Array<{
+              name: string;
+              exerciseType: string;
+              muscleGroup: string;
+              sets: number | null;
+              reps: number | null;
+              weightLbs: number | null;
+              durationMins: number;
+              caloriesBurned: number;
+              intensity: "light" | "moderate" | "intense";
+              notes: string;
+            }>;
+          };
+
+          if (!parsed.exercises || !Array.isArray(parsed.exercises) || parsed.exercises.length === 0) {
+            throw new Error("No exercises parsed");
+          }
+
+          return {
+            summary: parsed.summary || "",
+            workoutLocation: parsed.workoutLocation || "",
+            totalDurationMins: Math.max(1, Math.round(parsed.totalDurationMins || 0)),
+            totalCaloriesBurned: Math.max(0, Math.round(parsed.totalCaloriesBurned || 0)),
+            exercises: parsed.exercises.map((ex) => ({
+              name: ex.name || "Exercise",
+              exerciseType: ex.exerciseType || "Strength",
+              muscleGroup: ex.muscleGroup || "",
+              sets: ex.sets ?? null,
+              reps: ex.reps ?? null,
+              weightLbs: ex.weightLbs ?? null,
+              durationMins: Math.max(1, Math.round(ex.durationMins || 5)),
+              caloriesBurned: Math.max(0, Math.round(ex.caloriesBurned || 0)),
+              intensity: ex.intensity || "moderate",
+              notes: ex.notes || "",
+            })),
+          };
+        } catch (error) {
+          console.error("[parseFromText] Gemini parse failed:", error);
+          // Simple fallback: treat the whole text as one workout entry
+          const normalized = input.text.toLowerCase();
+          const exerciseType = /cardio|run|bike|swim|walk/.test(normalized) ? "Cardio" :
+            /yoga|stretch|flex/.test(normalized) ? "Flexibility" :
+            /hiit|circuit|interval/.test(normalized) ? "HIIT" : "Strength";
+          const intensity: "light" | "moderate" | "intense" = /hard|heavy|intense/.test(normalized) ? "intense" :
+            /easy|light/.test(normalized) ? "light" : "moderate";
+          return {
+            summary: input.text.slice(0, 120),
+            workoutLocation: "",
+            totalDurationMins: 45,
+            totalCaloriesBurned: 250,
+            exercises: [{
+              name: "Workout Session",
+              exerciseType,
+              muscleGroup: "",
+              sets: null,
+              reps: null,
+              weightLbs: null,
+              durationMins: 45,
+              caloriesBurned: 250,
+              intensity,
+              notes: input.text.slice(0, 500),
+            }],
+          };
+        }
+      }),
+
     // ── Gemini AI Workout Plan Generator ──────────────────────────────────────
     getAIWorkoutPlan: protectedProcedure
       .input(
