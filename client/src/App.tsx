@@ -24,6 +24,14 @@ const Progress = lazy(() => import("./pages/Progress").then((m) => ({ default: m
 const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })));
 const Grocery = lazy(() => import("./pages/Grocery").then((m) => ({ default: m.Grocery })));
 
+// Detect if visitor is on the root marketing domain (humanaize.life / www.humanaize.life)
+// vs the app subdomain (app.humanaize.life). On the root domain the landing page is shown
+// at / so visitors see the marketing page instead of the app dashboard.
+const isRootMarketingDomain =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "humanaize.life" ||
+    window.location.hostname === "www.humanaize.life");
+
 function RouteLoader() {
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
@@ -39,7 +47,15 @@ function Router() {
         <Route path={"/landing"} component={Landing} />
         <Route path={"/login"} component={Login} />
         <Route path={"/signup"} component={Signup} />
-        <Route path={"/"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
+        {/* Root path: show landing page on humanaize.life, dashboard on app.humanaize.life */}
+        <Route
+          path={"/"}
+          component={
+            isRootMarketingDomain
+              ? Landing
+              : () => <DashboardLayout><Dashboard /></DashboardLayout>
+          }
+        />
         <Route path={"/dashboard"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
         <Route path={"/history"} component={() => <DashboardLayout><History /></DashboardLayout>} />
         <Route path={"/sources"} component={() => <DashboardLayout><Sources /></DashboardLayout>} />
