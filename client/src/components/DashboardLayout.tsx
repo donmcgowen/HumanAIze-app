@@ -211,8 +211,8 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
           className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 text-left focus:outline-none"
           onClick={() => setLocation("/dashboard")}
         >
-          <div className="h-2.5 w-2.5 rounded-none border border-cyan-300 bg-cyan-200/30" />
-          <span className="text-sm font-black uppercase tracking-[0.18em] text-white">HumanAIze</span>
+          <img src="/humanaize-logo.png" alt="HumanAIze" className="h-8 w-8 object-contain" />
+          <span className="text-sm font-black uppercase tracking-[0.18em] text-white">Human<span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">AIze</span></span>
         </button>
 
         {/* Right: empty spacer to keep centre title truly centred */}
@@ -238,8 +238,8 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
         {/* Drawer header */}
         <div className="flex h-16 items-center justify-between border-b border-white/10 px-4">
           <div className="flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-none border border-cyan-300 bg-cyan-200/30" />
-            <span className="text-sm font-black uppercase tracking-[0.18em] text-white">HumanAIze</span>
+            <img src="/humanaize-logo.png" alt="HumanAIze" className="h-8 w-8 object-contain" />
+            <span className="text-sm font-black uppercase tracking-[0.18em] text-white">Human<span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">AIze</span></span>
           </div>
           <button
             onClick={() => setIsMenuOpen(false)}
