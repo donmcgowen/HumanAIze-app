@@ -22,6 +22,7 @@ const Workouts = lazy(() => import("./pages/Workouts").then((m) => ({ default: m
 const Monitoring = lazy(() => import("./pages/Monitoring").then((m) => ({ default: m.Monitoring })));
 const Progress = lazy(() => import("./pages/Progress").then((m) => ({ default: m.Progress })));
 const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })));
+const Grocery = lazy(() => import("./pages/Grocery").then((m) => ({ default: m.Grocery })));
 
 function RouteLoader() {
   return (
@@ -51,6 +52,7 @@ function Router() {
         <Route path={"/feedback"} component={() => <DashboardLayout><AppFeedback /></DashboardLayout>} />
         <Route path={"/summaries"} component={() => <DashboardLayout><Summaries /></DashboardLayout>} />
         <Route path={"/help"} component={() => <DashboardLayout><Help /></DashboardLayout>} />
+        <Route path={"/grocery"} component={() => <DashboardLayout><Grocery /></DashboardLayout>} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
       </Switch>

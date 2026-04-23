@@ -1,6 +1,6 @@
 import { and, eq, gte, lte, lt, desc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto, glucoseReadings, GlucoseReading, activitySamples, weightEntries, InsertWeightEntry, WeightEntry, workoutEntries, InsertWorkoutEntry, WorkoutEntry, bodyMeasurements, InsertBodyMeasurement, BodyMeasurement } from "../drizzle/schema";
+import { InsertUser, users, userProfiles, InsertUserProfile, UserProfile, foodLogs, InsertFoodLog, FoodLog, healthSources, favoriteFoods, InsertFavoriteFood, FavoriteFood, mealTemplates, InsertMealTemplate, MealTemplate, foodSearchCache, InsertFoodSearchCache, FoodSearchCache, progressPhotos, InsertProgressPhoto, ProgressPhoto, glucoseReadings, GlucoseReading, activitySamples, weightEntries, InsertWeightEntry, WeightEntry, workoutEntries, InsertWorkoutEntry, WorkoutEntry, bodyMeasurements, InsertBodyMeasurement, BodyMeasurement, groceryItems, InsertGroceryItem, GroceryItem } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { getAzureSqlPool } from "./azureDb";
 import { calculateMacroTargets, calculateTDEE, type FitnessGoal } from "./fitnessGoal";
@@ -3235,4 +3235,155 @@ ORDER BY [recordedAt] DESC, [id] DESC
       change: latest.hipsInches && oldest.hipsInches ? latest.hipsInches - oldest.hipsInches : undefined,
     },
   };
+}
+
+// ── Grocery List DB Functions ─────────────────────────────────────────────────
+
+const ENSURE_GROCERY_TABLE = `
+  IF OBJECT_ID(N'dbo.grocery_items', N'U') IS NULL
+  BEGIN
+    CREATE TABLE [dbo].[grocery_items] (
+      [id]              INT IDENTITY(1,1) PRIMARY KEY,
+      [userId]          INT NOT NULL,
+      [name]            NVARCHAR(191) NOT NULL,
+      [category]        NVARCHAR(64) NOT NULL DEFAULT 'other',
+      [caloriesPer100g] FLOAT NULL DEFAULT 0,
+      [proteinPer100g]  FLOAT NULL DEFAULT 0,
+      [carbsPer100g]    FLOAT NULL DEFAULT 0,
+      [fatPer100g]      FLOAT NULL DEFAULT 0,
+      [suggestedQty]    NVARCHAR(64) NULL,
+      [notes]           NVARCHAR(255) NULL,
+      [isChecked]       TINYINT NOT NULL DEFAULT 0,
+      [isAiSuggested]   TINYINT NOT NULL DEFAULT 1,
+      [addedAt]         DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+      [updatedAt]       DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX [idx_grocery_items_userId] ON [dbo].[grocery_items] ([userId]);
+  END
+`;
+
+function rowToGroceryItem(row: any): GroceryItem {
+  return {
+    ...row,
+    isChecked: Number(row.isChecked ?? 0),
+    isAiSuggested: Number(row.isAiSuggested ?? 1),
+    addedAt: new Date(row.addedAt),
+    updatedAt: new Date(row.updatedAt),
+  } as any;
+}
+
+export async function getGroceryItems(userId: number): Promise<GroceryItem[]> {
+  const db = await getDb();
+  if (!db) {
+    if (!ENV.azureSqlConnectionString) return [];
+    try {
+      const pool = await getAzureSqlPool();
+      await pool.request().query(ENSURE_GROCERY_TABLE);
+      const r = await pool.request().input("userId", userId)
+        .query<any>(`SELECT * FROM [dbo].[grocery_items] WHERE [userId]=@userId ORDER BY [category], [name]`);
+      return (r.recordset || []).map(rowToGroceryItem);
+    } catch { return []; }
+  }
+  return db.select().from(groceryItems).where(eq(groceryItems.userId, userId)).orderBy(groceryItems.category, groceryItems.name);
+}
+
+export async function addGroceryItem(userId: number, item: Omit<InsertGroceryItem, 'userId'>): Promise<GroceryItem> {
+  const db = await getDb();
+  if (!db) {
+    if (!ENV.azureSqlConnectionString) throw new Error("Database not available");
+    const pool = await getAzureSqlPool();
+    await pool.request().query(ENSURE_GROCERY_TABLE);
+    await pool.request()
+      .input("userId", userId)
+      .input("name", item.name)
+      .input("category", item.category ?? "other")
+      .input("caloriesPer100g", item.caloriesPer100g ?? 0)
+      .input("proteinPer100g", item.proteinPer100g ?? 0)
+      .input("carbsPer100g", item.carbsPer100g ?? 0)
+      .input("fatPer100g", item.fatPer100g ?? 0)
+      .input("suggestedQty", item.suggestedQty ?? null)
+      .input("notes", item.notes ?? null)
+      .input("isChecked", item.isChecked ?? 0)
+      .input("isAiSuggested", item.isAiSuggested ?? 1)
+      .query(`INSERT INTO [dbo].[grocery_items] ([userId],[name],[category],[caloriesPer100g],[proteinPer100g],[carbsPer100g],[fatPer100g],[suggestedQty],[notes],[isChecked],[isAiSuggested]) VALUES (@userId,@name,@category,@caloriesPer100g,@proteinPer100g,@carbsPer100g,@fatPer100g,@suggestedQty,@notes,@isChecked,@isAiSuggested)`);
+    const r = await pool.request().input("userId", userId)
+      .query<any>(`SELECT TOP 1 * FROM [dbo].[grocery_items] WHERE [userId]=@userId ORDER BY [id] DESC`);
+    return rowToGroceryItem(r.recordset[0]);
+  }
+  const newItem: InsertGroceryItem = { userId, ...item };
+  await db.insert(groceryItems).values(newItem);
+  const created = await db.select().from(groceryItems).where(eq(groceryItems.userId, userId)).orderBy(desc(groceryItems.id)).limit(1);
+  return created[0];
+}
+
+export async function bulkReplaceGroceryItems(userId: number, items: Omit<InsertGroceryItem, 'userId'>[]): Promise<GroceryItem[]> {
+  const db = await getDb();
+  if (!db) {
+    if (!ENV.azureSqlConnectionString) throw new Error("Database not available");
+    const pool = await getAzureSqlPool();
+    await pool.request().query(ENSURE_GROCERY_TABLE);
+    // Delete only AI-suggested items, keep user-added ones
+    await pool.request().input("userId", userId)
+      .query(`DELETE FROM [dbo].[grocery_items] WHERE [userId]=@userId AND [isAiSuggested]=1`);
+    for (const item of items) {
+      await pool.request()
+        .input("userId", userId)
+        .input("name", item.name)
+        .input("category", item.category ?? "other")
+        .input("caloriesPer100g", item.caloriesPer100g ?? 0)
+        .input("proteinPer100g", item.proteinPer100g ?? 0)
+        .input("carbsPer100g", item.carbsPer100g ?? 0)
+        .input("fatPer100g", item.fatPer100g ?? 0)
+        .input("suggestedQty", item.suggestedQty ?? null)
+        .input("notes", item.notes ?? null)
+        .input("isChecked", 0)
+        .input("isAiSuggested", 1)
+        .query(`INSERT INTO [dbo].[grocery_items] ([userId],[name],[category],[caloriesPer100g],[proteinPer100g],[carbsPer100g],[fatPer100g],[suggestedQty],[notes],[isChecked],[isAiSuggested]) VALUES (@userId,@name,@category,@caloriesPer100g,@proteinPer100g,@carbsPer100g,@fatPer100g,@suggestedQty,@notes,@isChecked,@isAiSuggested)`);
+    }
+    const r = await pool.request().input("userId", userId)
+      .query<any>(`SELECT * FROM [dbo].[grocery_items] WHERE [userId]=@userId ORDER BY [category], [name]`);
+    return (r.recordset || []).map(rowToGroceryItem);
+  }
+  // Delete AI-suggested items only
+  await db.delete(groceryItems).where(and(eq(groceryItems.userId, userId), eq(groceryItems.isAiSuggested, 1)));
+  if (items.length > 0) {
+    await db.insert(groceryItems).values(items.map(i => ({ userId, ...i, isChecked: 0, isAiSuggested: 1 })));
+  }
+  return db.select().from(groceryItems).where(eq(groceryItems.userId, userId)).orderBy(groceryItems.category, groceryItems.name);
+}
+
+export async function updateGroceryItemChecked(id: number, userId: number, isChecked: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    if (!ENV.azureSqlConnectionString) return;
+    const pool = await getAzureSqlPool();
+    await pool.request().input("id", id).input("userId", userId).input("isChecked", isChecked ? 1 : 0)
+      .query(`UPDATE [dbo].[grocery_items] SET [isChecked]=@isChecked WHERE [id]=@id AND [userId]=@userId`);
+    return;
+  }
+  await db.update(groceryItems).set({ isChecked: isChecked ? 1 : 0 }).where(and(eq(groceryItems.id, id), eq(groceryItems.userId, userId)));
+}
+
+export async function deleteGroceryItem(id: number, userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    if (!ENV.azureSqlConnectionString) return;
+    const pool = await getAzureSqlPool();
+    await pool.request().input("id", id).input("userId", userId)
+      .query(`DELETE FROM [dbo].[grocery_items] WHERE [id]=@id AND [userId]=@userId`);
+    return;
+  }
+  await db.delete(groceryItems).where(and(eq(groceryItems.id, id), eq(groceryItems.userId, userId)));
+}
+
+export async function clearCheckedGroceryItems(userId: number): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    if (!ENV.azureSqlConnectionString) return;
+    const pool = await getAzureSqlPool();
+    await pool.request().input("userId", userId)
+      .query(`DELETE FROM [dbo].[grocery_items] WHERE [userId]=@userId AND [isChecked]=1`);
+    return;
+  }
+  await db.delete(groceryItems).where(and(eq(groceryItems.userId, userId), eq(groceryItems.isChecked, 1)));
 }

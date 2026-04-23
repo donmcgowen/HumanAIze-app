@@ -100,6 +100,7 @@ export function AIAssistant({ profile }: Props) {
   const [location] = useLocation();
 
   const askMutation = trpc.profile.askAssistant.useMutation();
+  const groceryQuery = trpc.grocery.getItems.useQuery(undefined, { staleTime: 60_000 });
 
   // Build profile summary for Gemini context
   const buildProfileSummary = useCallback(() => {
@@ -122,8 +123,16 @@ export function AIAssistant({ profile }: Props) {
     if (profile.dailyProteinTarget) parts.push(`Protein target: ${profile.dailyProteinTarget}g`);
     if (profile.dailyCarbsTarget) parts.push(`Carbs target: ${profile.dailyCarbsTarget}g`);
     if (profile.dailyFatTarget) parts.push(`Fat target: ${profile.dailyFatTarget}g`);
+    // Add grocery list context so Gemini can reference what the user has stocked
+    const groceryItems = groceryQuery.data ?? [];
+    if (groceryItems.length > 0) {
+      const unchecked = groceryItems.filter((i) => !i.isChecked).map((i) => i.name);
+      const checked = groceryItems.filter((i) => i.isChecked).map((i) => i.name);
+      if (unchecked.length > 0) parts.push(`Grocery list (to buy): ${unchecked.slice(0, 20).join(", ")}`);
+      if (checked.length > 0) parts.push(`Already purchased: ${checked.slice(0, 10).join(", ")}`);
+    }
     return parts.join(", ");
-  }, [profile]);
+  }, [profile, groceryQuery.data]);
 
   // Scroll to bottom on new messages
   useEffect(() => {

@@ -23,7 +23,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource, getGroceryItems, addGroceryItem, bulkReplaceGroceryItems, updateGroceryItemChecked, deleteGroceryItem, clearCheckedGroceryItems } from "./db";
 import { searchUSDAFoods, searchUSDABrandedFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant, getDefaultUnit } from "./barcode";
@@ -1460,17 +1460,45 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           servingWeightPerUnit?: number;
         };
 
-        /** Parse per-unit gram weight from a serving size string like "106g (2 scoops)" → 53 */
+        /** Parse per-unit gram weight from a serving size string.
+         * Handles all common label formats:
+         *   "82g"                  → 82
+         *   "106g (2 scoops)"      → 53  (total / count)
+         *   "2 scoops (82g)"       → 82  (grams in parens = per-serving total)
+         *   "1 cup (240ml)"        → 240 (ml treated as g for liquids)
+         *   "1.87 oz"              → 53  (oz → g)
+         *   "3 pieces (45g)"       → 45
+         */
         const parseServingWeightPerUnit = (servingSize?: string): number | undefined => {
           if (!servingSize) return undefined;
-          const multiMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g\s*\((\d+(?:\.\d+)?)\s+\w/i);
-          if (multiMatch) {
-            const totalG = parseFloat(multiMatch[1]);
-            const count = parseFloat(multiMatch[2]);
-            return (count > 1 && count <= 10) ? totalG / count : totalG;
+          const s = servingSize.trim();
+
+          // Pattern 1: "Xg (N units)" — total grams first, count in parens
+          // e.g. "106g (2 scoops)" → 106/2 = 53
+          const totalGFirst = s.match(/^(\d+(?:\.\d+)?)\s*g\s*\((\d+(?:\.\d+)?)\s+\w/i);
+          if (totalGFirst) {
+            const totalG = parseFloat(totalGFirst[1]);
+            const count = parseFloat(totalGFirst[2]);
+            return (count > 1 && count <= 20) ? totalG / count : totalG;
           }
-          const gMatch = servingSize.match(/^(\d+(?:\.\d+)?)\s*g/i);
-          if (gMatch) return parseFloat(gMatch[1]);
+
+          // Pattern 2: "N units (Xg)" or "N units (Xml)" — grams/ml in parens
+          // e.g. "2 scoops (82g)", "1 cup (240ml)", "3 pieces (45g)"
+          const countUnitGrams = s.match(/^\d+(?:\.\d+)?\s+[a-zA-Z\s]+?\((\d+(?:\.\d+)?)\s*(?:g|ml|mL)\)/i);
+          if (countUnitGrams) return parseFloat(countUnitGrams[1]);
+
+          // Pattern 3: "Xg" or "Xml" direct weight
+          const directG = s.match(/^(\d+(?:\.\d+)?)\s*(g|ml|mL)$/i);
+          if (directG) return parseFloat(directG[1]);
+
+          // Pattern 4: "X oz"
+          const ozMatch = s.match(/^(\d+(?:\.\d+)?)\s*oz$/i);
+          if (ozMatch) return parseFloat(ozMatch[1]) * 28.35;
+
+          // Pattern 5: any gram value in the string (e.g. "82g per serving")
+          const anyG = s.match(/(\d+(?:\.\d+)?)\s*g/i);
+          if (anyG) return parseFloat(anyG[1]);
+
           return undefined;
         };
 
@@ -1918,6 +1946,112 @@ Respond ONLY with a JSON array, no markdown:
         };
       }),
   }),
+  grocery: router({
+    getItems: protectedProcedure.query(async ({ ctx }) => {
+      return getGroceryItems(ctx.user.id);
+    }),
+
+    addItem: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        category: z.string().default("other"),
+        caloriesPer100g: z.number().optional(),
+        proteinPer100g: z.number().optional(),
+        carbsPer100g: z.number().optional(),
+        fatPer100g: z.number().optional(),
+        suggestedQty: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        return addGroceryItem(ctx.user.id, { ...input, isAiSuggested: 0 });
+      }),
+
+    toggleChecked: protectedProcedure
+      .input(z.object({ id: z.number(), isChecked: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        await updateGroceryItemChecked(input.id, ctx.user.id, input.isChecked);
+        return { success: true };
+      }),
+
+    deleteItem: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await deleteGroceryItem(input.id, ctx.user.id);
+        return { success: true };
+      }),
+
+    clearChecked: protectedProcedure.mutation(async ({ ctx }) => {
+      await clearCheckedGroceryItems(ctx.user.id);
+      return { success: true };
+    }),
+
+    generateWithAI: protectedProcedure.mutation(async ({ ctx }) => {
+      const profile = await getUserProfile(ctx.user.id);
+      if (!profile) throw new TRPCError({ code: "BAD_REQUEST", message: "Complete your profile first" });
+
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genAI = new GoogleGenerativeAI(ENV.geminiApiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      const goal = profile.fitnessGoal === "lose_fat" ? "fat loss" : profile.fitnessGoal === "build_muscle" ? "muscle gain" : "maintenance";
+      const cals = profile.dailyCalorieTarget ?? 2000;
+      const prot = profile.dailyProteinTarget ?? 150;
+      const carbs = profile.dailyCarbsTarget ?? 200;
+      const fat = profile.dailyFatTarget ?? 65;
+
+      const prompt = `You are a nutrition expert and personal trainer. Generate a personalized weekly grocery list for a user with the following profile:
+- Goal: ${goal}
+- Daily targets: ${cals} calories, ${prot}g protein, ${carbs}g carbs, ${fat}g fat
+- Weight: ${profile.weightLbs ?? "unknown"}lbs, Height: ${profile.heightIn ?? "unknown"}in, Age: ${profile.ageYears ?? "unknown"}
+- Activity level: ${profile.activityLevel ?? "moderately_active"}
+
+Generate 25-35 grocery items that will help them hit their daily macro targets consistently. Focus on whole foods: lean proteins (chicken breast, ground beef, eggs, Greek yogurt, cottage cheese, tuna, salmon), complex carbs (sweet potatoes, oats, rice, quinoa, fruits), healthy fats (avocado, olive oil, nuts), and plenty of vegetables.
+
+Return ONLY a JSON array (no markdown) with this exact structure:
+[
+  {
+    "name": "Chicken Breast",
+    "category": "protein",
+    "caloriesPer100g": 165,
+    "proteinPer100g": 31,
+    "carbsPer100g": 0,
+    "fatPer100g": 3.6,
+    "suggestedQty": "3 lbs",
+    "notes": "Lean protein, versatile for meal prep"
+  }
+]
+
+Categories must be one of: protein, dairy, produce, grains, fats, beverages, other.
+All macro values must be per 100g. Be specific with suggestedQty (e.g. "2 lbs", "1 dozen", "32 oz", "1 bag").`;
+
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to generate grocery list" });
+
+      const items = JSON.parse(jsonMatch[0]) as Array<{
+        name: string; category: string;
+        caloriesPer100g: number; proteinPer100g: number; carbsPer100g: number; fatPer100g: number;
+        suggestedQty?: string; notes?: string;
+      }>;
+
+      const groceryList = items.map(item => ({
+        name: item.name,
+        category: item.category || "other",
+        caloriesPer100g: Number(item.caloriesPer100g) || 0,
+        proteinPer100g: Number(item.proteinPer100g) || 0,
+        carbsPer100g: Number(item.carbsPer100g) || 0,
+        fatPer100g: Number(item.fatPer100g) || 0,
+        suggestedQty: item.suggestedQty,
+        notes: item.notes,
+        isAiSuggested: 1 as const,
+      }));
+
+      return bulkReplaceGroceryItems(ctx.user.id, groceryList);
+    }),
+  }),
+
   workouts: router({
     addEntry: protectedProcedure
       .input(

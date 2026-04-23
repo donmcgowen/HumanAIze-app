@@ -8,6 +8,7 @@ import {
   mysqlTable,
   text,
   timestamp,
+  tinyint,
   varchar,
 } from "drizzle-orm/mysql-core";
 
@@ -364,3 +365,25 @@ export const bodyMeasurements = mysqlTable("body_measurements", {
 
 export type BodyMeasurement = typeof bodyMeasurements.$inferSelect;
 export type InsertBodyMeasurement = typeof bodyMeasurements.$inferInsert;
+
+// ── Grocery List ─────────────────────────────────────────────────────────────
+export const groceryItems = mysqlTable("grocery_items", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().references(() => users.id),
+  name: varchar("name", { length: 191 }).notNull(),
+  category: varchar("category", { length: 64 }).notNull().default("other"),
+  // Nutrition per 100g for reference
+  caloriesPer100g: double("caloriesPer100g").default(0),
+  proteinPer100g: double("proteinPer100g").default(0),
+  carbsPer100g: double("carbsPer100g").default(0),
+  fatPer100g: double("fatPer100g").default(0),
+  // Suggested weekly quantity for the user's goals
+  suggestedQty: varchar("suggestedQty", { length: 64 }), // e.g. "2 lbs", "1 dozen", "3 cups"
+  notes: varchar("notes", { length: 255 }), // e.g. "high protein, lean", "buy organic"
+  isChecked: tinyint("isChecked").default(0).notNull(), // 0 = not bought, 1 = in cart
+  isAiSuggested: tinyint("isAiSuggested").default(1).notNull(), // 1 = AI added, 0 = user added
+  addedAt: timestamp("addedAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type GroceryItem = typeof groceryItems.$inferSelect;
+export type InsertGroceryItem = typeof groceryItems.$inferInsert;

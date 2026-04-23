@@ -29,6 +29,7 @@ import {
   ChevronRight,
   Settings,
   MessageSquarePlus,
+  ShoppingCart,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -46,6 +47,7 @@ const allMenuItems = [
   { icon: Cable, label: "Monitoring", path: "/monitoring", mvp: true },
   { icon: Apple, label: "Food Logging", path: "/food-logging", mvp: true },
   { icon: Dumbbell, label: "Workouts", path: "/workouts", mvp: true },
+  { icon: ShoppingCart, label: "Grocery", path: "/grocery", mvp: true },
   { icon: TrendingUp, label: "Progress", path: "/progress", mvp: false },
   { icon: MessageSquarePlus, label: "App Feedback", path: "/feedback", mvp: false },
   { icon: Mail, label: "Weekly Summaries", path: "/summaries", mvp: false },
