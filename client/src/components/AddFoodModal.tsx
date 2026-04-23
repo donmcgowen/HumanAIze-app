@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Search, FileText, Barcode, Loader2, AlertCircle, Clock, Camera, Trash2, CheckCircle, Star } from "lucide-react";
+import { Search, FileText, Barcode, Loader2, AlertCircle, Clock, Camera, Trash2, CheckCircle, Star, UtensilsCrossed, ChevronDown, ChevronUp } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { skipToken } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
@@ -27,7 +27,7 @@ interface AddFoodModalProps {
 }
 
 export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFoodModalProps) {
-  const [activeTab, setActiveTab] = useState<"search" | "manual" | "scan" | "favorites">("search");
+  const [activeTab, setActiveTab] = useState<"search" | "manual" | "scan" | "favorites" | "meals">("search");
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -38,22 +38,26 @@ export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFood
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="search" className="flex items-center gap-2">
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="search" className="flex items-center gap-1">
               <Search className="h-4 w-4" />
               <span className="hidden sm:inline">Search</span>
             </TabsTrigger>
-            <TabsTrigger value="manual" className="flex items-center gap-2">
+            <TabsTrigger value="manual" className="flex items-center gap-1">
               <FileText className="h-4 w-4" />
               <span className="hidden sm:inline">Manual</span>
             </TabsTrigger>
-            <TabsTrigger value="scan" className="flex items-center gap-2">
+            <TabsTrigger value="scan" className="flex items-center gap-1">
               <Camera className="h-4 w-4" />
               <span className="hidden sm:inline">AI Scan</span>
             </TabsTrigger>
-            <TabsTrigger value="favorites" className="flex items-center gap-2">
+            <TabsTrigger value="favorites" className="flex items-center gap-1">
               <Star className="h-4 w-4" />
               <span className="hidden sm:inline">Favorites</span>
+            </TabsTrigger>
+            <TabsTrigger value="meals" className="flex items-center gap-1">
+              <UtensilsCrossed className="h-4 w-4" />
+              <span className="hidden sm:inline">Meals</span>
             </TabsTrigger>
           </TabsList>
 
@@ -71,6 +75,10 @@ export function AddFoodModal({ isOpen, onClose, onFoodAdded, mealType }: AddFood
 
           <TabsContent value="favorites" className="space-y-4 mt-4">
             <FavoritesTab onFoodAdded={onFoodAdded} onClose={onClose} />
+          </TabsContent>
+
+          <TabsContent value="meals" className="space-y-4 mt-4">
+            <MealsTab onFoodAdded={onFoodAdded} onClose={onClose} />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -1649,6 +1657,230 @@ function FavoritesTab({ onFoodAdded, onClose }: FavoritesTabProps) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── MealsTab ──────────────────────────────────────────────────────────────────
+interface MealsTabProps {
+  onFoodAdded: (food: any) => void;
+  onClose: () => void;
+}
+
+function MealsTab({ onFoodAdded, onClose }: MealsTabProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const { data: meals, isLoading } = trpc.food.getMeals.useQuery();
+
+  // Live filter: match meal name or any food name inside the meal
+  const filtered = useMemo(() => {
+    if (!meals) return [];
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return meals as any[];
+    return (meals as any[]).filter((meal: any) => {
+      if (meal.mealName?.toLowerCase().includes(q)) return true;
+      // Also search inside the foods array of the meal
+      const foods = Array.isArray(meal.foods)
+        ? meal.foods
+        : typeof meal.foods === "string"
+        ? (() => { try { return JSON.parse(meal.foods); } catch { return []; } })()
+        : [];
+      return foods.some((f: any) => f.foodName?.toLowerCase().includes(q));
+    });
+  }, [meals, searchQuery]);
+
+  function handleAddMeal(meal: any) {
+    // Parse foods array (may be stored as JSON string in Azure SQL)
+    const foods: any[] = Array.isArray(meal.foods)
+      ? meal.foods
+      : typeof meal.foods === "string"
+      ? (() => { try { return JSON.parse(meal.foods); } catch { return []; } })()
+      : [];
+
+    if (foods.length === 0) {
+      // Fallback: add the whole meal as a single food entry using totals
+      onFoodAdded({
+        foodName: meal.mealName,
+        servingSize: "1 serving",
+        calories: meal.totalCalories ?? 0,
+        proteinGrams: meal.totalProteinGrams ?? 0,
+        carbsGrams: meal.totalCarbsGrams ?? 0,
+        fatGrams: meal.totalFatGrams ?? 0,
+        sugarGrams: 0,
+      });
+      toast.success(`Added "${meal.mealName}" to your log`);
+      onClose();
+      return;
+    }
+
+    // Add each food item in the meal individually
+    for (const food of foods) {
+      onFoodAdded({
+        foodName: food.foodName ?? meal.mealName,
+        servingSize: food.servingSize ?? "1 serving",
+        calories: food.calories ?? 0,
+        proteinGrams: food.proteinGrams ?? 0,
+        carbsGrams: food.carbsGrams ?? 0,
+        fatGrams: food.fatGrams ?? 0,
+        sugarGrams: food.sugarGrams ?? 0,
+      });
+    }
+    toast.success(`Added ${foods.length} item${foods.length > 1 ? "s" : ""} from "${meal.mealName}"`);
+    onClose();
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10">
+        <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />
+      </div>
+    );
+  }
+
+  if (!meals || (meals as any[]).length === 0) {
+    return (
+      <div className="text-center py-10">
+        <UtensilsCrossed className="h-10 w-10 text-slate-600 mx-auto mb-3" />
+        <p className="text-slate-400 text-sm font-medium">No meal templates yet</p>
+        <p className="text-slate-500 text-xs mt-1">
+          Create meal templates from the Meals section to quickly log your favorite meals.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Live search input */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <input
+          type="text"
+          placeholder="Search meals... (e.g. chicken, breakfast)"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full pl-9 pr-4 py-2.5 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 focus:border-cyan-500"
+          autoFocus
+        />
+        {searchQuery && (
+          <button
+            onClick={() => setSearchQuery("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {/* Results count */}
+      {searchQuery && (
+        <p className="text-xs text-slate-500">
+          {filtered.length === 0
+            ? "No meals match your search"
+            : `${filtered.length} meal${filtered.length > 1 ? "s" : ""} found`}
+        </p>
+      )}
+
+      {/* Meal list */}
+      <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+        {filtered.length === 0 && searchQuery ? (
+          <div className="text-center py-8">
+            <UtensilsCrossed className="h-8 w-8 text-slate-600 mx-auto mb-2" />
+            <p className="text-slate-400 text-sm">No meals match &ldquo;{searchQuery}&rdquo;</p>
+          </div>
+        ) : (
+          filtered.map((meal: any) => {
+            const foods: any[] = Array.isArray(meal.foods)
+              ? meal.foods
+              : typeof meal.foods === "string"
+              ? (() => { try { return JSON.parse(meal.foods); } catch { return []; } })()
+              : [];
+            const isExpanded = expandedId === meal.id;
+
+            return (
+              <div
+                key={meal.id}
+                className="rounded-lg bg-slate-800/60 border border-slate-700/50 overflow-hidden"
+              >
+                {/* Meal header row */}
+                <div className="flex items-center gap-3 p-3">
+                  <button
+                    className="flex-1 min-w-0 text-left"
+                    onClick={() => setExpandedId(isExpanded ? null : meal.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-white text-sm truncate">{meal.mealName}</span>
+                      {meal.mealType && meal.mealType !== "other" && (
+                        <span className="text-xs text-slate-500 capitalize bg-slate-700/60 px-1.5 py-0.5 rounded shrink-0">
+                          {meal.mealType}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      {meal.totalCalories} cal &bull; {Number(meal.totalProteinGrams).toFixed(0)}g P &bull; {Number(meal.totalCarbsGrams).toFixed(0)}g C &bull; {Number(meal.totalFatGrams).toFixed(0)}g F
+                    </div>
+                    {foods.length > 0 && (
+                      <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+                        {foods.length} item{foods.length > 1 ? "s" : ""}
+                        {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                      </div>
+                    )}
+                  </button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleAddMeal(meal)}
+                    className="bg-cyan-600 hover:bg-cyan-700 text-white h-8 px-3 text-xs shrink-0"
+                  >
+                    Add All
+                  </Button>
+                </div>
+
+                {/* Expanded food items */}
+                {isExpanded && foods.length > 0 && (
+                  <div className="border-t border-slate-700/50 px-3 pb-3 pt-2 space-y-1.5">
+                    {foods.map((food: any, idx: number) => (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2 py-1.5 px-2 rounded bg-slate-700/40 hover:bg-slate-700/70 transition-colors group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-medium text-slate-200 truncate">{food.foodName}</div>
+                          <div className="text-xs text-slate-500">
+                            {food.calories} cal &bull; {food.proteinGrams}g P &bull; {food.carbsGrams}g C &bull; {food.fatGrams}g F
+                            {food.servingSize && food.servingSize !== "1 serving" && (
+                              <span className="text-slate-600"> &bull; {food.servingSize}</span>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            onFoodAdded({
+                              foodName: food.foodName,
+                              servingSize: food.servingSize ?? "1 serving",
+                              calories: food.calories ?? 0,
+                              proteinGrams: food.proteinGrams ?? 0,
+                              carbsGrams: food.carbsGrams ?? 0,
+                              fatGrams: food.fatGrams ?? 0,
+                              sugarGrams: food.sugarGrams ?? 0,
+                            });
+                            toast.success(`Added "${food.foodName}"`);
+                            onClose();
+                          }}
+                          className="text-cyan-500 hover:text-cyan-300 h-7 px-2 text-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          Add
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
