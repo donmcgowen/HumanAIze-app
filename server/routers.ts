@@ -185,6 +185,51 @@ export const appRouter = router({
           throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to update photo" });
         }
       }),
+    analyzeBodyPhoto: protectedProcedure
+      .input(
+        z.object({
+          photoBase64: z.string(),
+          mimeType: z.string().default("image/jpeg"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const profile = await getUserProfile(ctx.user.id);
+          const { GoogleGenerativeAI } = await import("@google/generative-ai");
+          const { ENV } = await import("./_core/env");
+          const genAI = new GoogleGenerativeAI(ENV.geminiApiKey);
+          const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+          const profileContext = profile
+            ? `User profile: Age ${profile.ageYears ?? "unknown"}, Height ${profile.heightIn ?? "unknown"}in, Weight ${profile.weightLbs ?? "unknown"}lbs, Goal: ${profile.fitnessGoal ?? "maintain"}, Goal weight: ${profile.goalWeightLbs ?? "unknown"}lbs.`
+            : "No profile data available.";
+          const prompt = `You are a professional fitness and body composition analyst. Analyze this full-body photo and provide a detailed, honest, and constructive assessment.\n${profileContext}\nProvide your analysis in the following JSON format ONLY (no markdown):\n{\n  "estimatedBodyFatPercent": number,\n  "estimatedMuscleMass": "low" | "moderate" | "high" | "very high",\n  "overallHealthRating": "underweight" | "healthy" | "overweight" | "obese",\n  "bmi": number | null,\n  "positiveAreas": ["string"],\n  "areasForImprovement": ["string"],\n  "primaryRecommendation": "fat_loss" | "muscle_gain" | "maintain" | "recomposition",\n  "recommendationReason": "string",\n  "actionPlan": ["string"],\n  "nutritionTips": ["string"],\n  "disclaimer": "string"\n}\nIMPORTANT: Be specific and honest. Provide 3-5 items in positiveAreas and areasForImprovement. Provide 3-5 actionPlan steps and 2-3 nutritionTips. Focus on health, not appearance criticism.`;
+          const result = await model.generateContent([
+            { text: prompt },
+            { inlineData: { mimeType: input.mimeType, data: input.photoBase64 } },
+          ]);
+          const text = result.response.text();
+          const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) throw new Error("No JSON in Gemini response");
+          const analysis = JSON.parse(jsonMatch[0]);
+          return {
+            estimatedBodyFatPercent: Number(analysis.estimatedBodyFatPercent) || null,
+            estimatedMuscleMass: String(analysis.estimatedMuscleMass || "moderate"),
+            overallHealthRating: String(analysis.overallHealthRating || "healthy"),
+            bmi: analysis.bmi ? Number(analysis.bmi) : null,
+            positiveAreas: Array.isArray(analysis.positiveAreas) ? analysis.positiveAreas as string[] : [],
+            areasForImprovement: Array.isArray(analysis.areasForImprovement) ? analysis.areasForImprovement as string[] : [],
+            primaryRecommendation: String(analysis.primaryRecommendation || "maintain"),
+            recommendationReason: String(analysis.recommendationReason || ""),
+            actionPlan: Array.isArray(analysis.actionPlan) ? analysis.actionPlan as string[] : [],
+            nutritionTips: Array.isArray(analysis.nutritionTips) ? analysis.nutritionTips as string[] : [],
+            disclaimer: String(analysis.disclaimer || "This is an AI estimate and not medical advice."),
+          };
+        } catch (error) {
+          console.error("[analyzeBodyPhoto] Error:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to analyze photo. Please try again with a clear full-body photo." });
+        }
+      }),
   }),
   auth: router({
     me: publicProcedure.query((opts) => opts.ctx.user),
@@ -2283,6 +2328,108 @@ Return ONLY valid JSON with no markdown:
               notes: input.text.slice(0, 500),
             }],
           };
+        }
+      }),
+
+    // ── Voice-to-Workout Parser (Gemini audio transcription + parse) ───────────
+    parseFromVoice: protectedProcedure
+      .input(
+        z.object({
+          audioBase64: z.string(),
+          mimeType: z.string().default("audio/m4a"),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        try {
+          const profile = await getUserProfile(ctx.user.id);
+          const userWeight = profile?.weightLbs || 170;
+          const { GoogleGenerativeAI } = await import("@google/generative-ai");
+          const { ENV } = await import("./_core/env");
+          const genAI = new GoogleGenerativeAI(ENV.geminiApiKey);
+          const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+          const prompt = `You are a fitness data parser. The user has described their workout by voice. First transcribe the audio, then parse it into structured exercise entries.
+User weight: ${userWeight} lbs (for calorie estimation)
+Rules:
+1. Extract EVERY distinct exercise mentioned
+2. If sets/reps/weight are mentioned, include them in the notes field (e.g. "3 sets x 10 reps @ 200 lbs")
+3. Estimate calories burned based on exercise type, intensity, and user weight
+4. Estimate duration per exercise if not explicitly stated
+5. Classify exerciseType as one of: Strength, Cardio, HIIT, Flexibility, Sports, Core, Other
+6. Determine intensity: light, moderate, or intense
+Return ONLY valid JSON with no markdown:
+{
+  "transcript": "string (what the user said)",
+  "summary": "string (1-2 sentence summary of the full workout session)",
+  "workoutLocation": "string (e.g. 'Gym', 'Home', 'Outdoors', or empty string)",
+  "totalDurationMins": number,
+  "totalCaloriesBurned": number,
+  "exercises": [
+    {
+      "name": "string",
+      "exerciseType": "string",
+      "muscleGroup": "string",
+      "sets": number | null,
+      "reps": number | null,
+      "weightLbs": number | null,
+      "durationMins": number,
+      "caloriesBurned": number,
+      "intensity": "light" | "moderate" | "intense",
+      "notes": "string"
+    }
+  ]
+}`;
+          const result = await model.generateContent([
+            { text: prompt },
+            { inlineData: { mimeType: input.mimeType, data: input.audioBase64 } },
+          ]);
+          const text = result.response.text();
+          const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+          const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+          if (!jsonMatch) throw new Error("No JSON in Gemini response");
+          const parsed = JSON.parse(jsonMatch[0]) as {
+            transcript: string;
+            summary: string;
+            workoutLocation: string;
+            totalDurationMins: number;
+            totalCaloriesBurned: number;
+            exercises: Array<{
+              name: string;
+              exerciseType: string;
+              muscleGroup: string;
+              sets: number | null;
+              reps: number | null;
+              weightLbs: number | null;
+              durationMins: number;
+              caloriesBurned: number;
+              intensity: "light" | "moderate" | "intense";
+              notes: string;
+            }>;
+          };
+          if (!parsed.exercises || !Array.isArray(parsed.exercises) || parsed.exercises.length === 0) {
+            throw new Error("No exercises parsed from voice");
+          }
+          return {
+            transcript: parsed.transcript || "",
+            summary: parsed.summary || "",
+            workoutLocation: parsed.workoutLocation || "",
+            totalDurationMins: Math.max(1, Math.round(parsed.totalDurationMins || 0)),
+            totalCaloriesBurned: Math.max(0, Math.round(parsed.totalCaloriesBurned || 0)),
+            exercises: parsed.exercises.map((ex) => ({
+              name: ex.name || "Exercise",
+              exerciseType: ex.exerciseType || "Strength",
+              muscleGroup: ex.muscleGroup || "",
+              sets: ex.sets ?? null,
+              reps: ex.reps ?? null,
+              weightLbs: ex.weightLbs ?? null,
+              durationMins: Math.max(1, Math.round(ex.durationMins || 5)),
+              caloriesBurned: Math.max(0, Math.round(ex.caloriesBurned || 0)),
+              intensity: ex.intensity || "moderate",
+              notes: ex.notes || "",
+            })),
+          };
+        } catch (error) {
+          console.error("[parseFromVoice] Gemini parse failed:", error);
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to parse voice workout. Please try again or use the text input." });
         }
       }),
 
