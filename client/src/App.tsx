@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import DashboardLayout from "./components/DashboardLayout";
 
 const NotFound = lazy(() => import("@/pages/NotFound"));
+const Landing = lazy(() => import("./pages/Landing"));
 const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -34,6 +35,7 @@ function Router() {
   return (
     <Suspense fallback={<RouteLoader />}>
       <Switch>
+        <Route path={"/landing"} component={Landing} />
         <Route path={"/login"} component={Login} />
         <Route path={"/signup"} component={Signup} />
         <Route path={"/"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />

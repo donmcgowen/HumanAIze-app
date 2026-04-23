@@ -58,8 +58,17 @@ export function serveStatic(app: Express) {
       },
     })
   );
-  app.use("*", (_req, res) => {
+  // Hostname-based routing:
+  // - humanaize.life (root domain) → redirect to /landing (platform landing page)
+  // - app.humanaize.life or any other host → serve the SPA normally
+  app.use("*", (req, res) => {
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    const host = (req.headers["x-forwarded-host"] || req.headers.host || "").toString().toLowerCase();
+    const isRootDomain = host === "humanaize.life" || host === "www.humanaize.life";
+    // If root domain and not already on /landing, redirect to landing page
+    if (isRootDomain && !req.originalUrl.startsWith("/landing") && !req.originalUrl.startsWith("/api")) {
+      return res.redirect(301, "/landing");
+    }
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
