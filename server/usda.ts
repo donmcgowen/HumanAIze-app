@@ -244,3 +244,42 @@ export async function getUSDAFoodDetails(fdcId: string): Promise<USDAFoodResult 
     return null;
   }
 }
+
+/**
+ * Search USDA FoodData Central for GENERIC / FOUNDATION foods only.
+ * Uses "Foundation", "SR Legacy", and "Survey (FNDDS)" data types which contain
+ * authoritative USDA nutrition data for plain, unprocessed whole foods.
+ * Does NOT include branded products.
+ *
+ * Use this for queries like "strawberries", "chicken breast", "brown rice".
+ */
+export async function searchUSDAFoundationFoods(query: string, limit = 10): Promise<USDAFoodResult[]> {
+  if (!query || query.length < 2) return [];
+  try {
+    const response = await fetch(`${USDA_API_BASE}/foods/search?api_key=${USDA_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        dataType: ["Foundation", "SR Legacy", "Survey (FNDDS)"],
+        pageSize: limit,
+        pageNumber: 1,
+        sortBy: "score",
+        sortOrder: "desc",
+      }),
+    });
+    if (!response.ok) {
+      console.error(`[USDA Foundation] API error: ${response.status}`);
+      return [];
+    }
+    const data = await response.json() as any;
+    if (!data.foods || !Array.isArray(data.foods)) return [];
+    // Filter out any branded items that slipped through, and items with no calories
+    return (data.foods as any[])
+      .map(mapFoodItem)
+      .filter((f: USDAFoodResult) => f.dataType !== "Branded" && f.calories > 0);
+  } catch (error) {
+    console.error("[USDA Foundation] search failed:", error);
+    return [];
+  }
+}
