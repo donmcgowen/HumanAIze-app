@@ -34,6 +34,99 @@ export async function searchFoodWithGemini(query: string): Promise<FoodVariation
 }
 
 /**
+ * Classify a food query into one of three tiers:
+ * - "whole_food": plain produce, meat, grain, dairy (e.g. "strawberries", "fresh strawberries", "chicken breast", "brown rice")
+ * - "branded": a specific brand name is the first word (e.g. "Muscle Milk", "Quest Bar", "Chobani")
+ * - "generic_packaged": a generic packaged food that has well-known brands (e.g. "chocolate milk", "greek yogurt", "protein powder")
+ */
+function classifyFoodQuery(query: string): { type: "whole_food" | "branded" | "generic_packaged"; coreFood: string } {
+  const normalized = query.trim().toLowerCase();
+  const words = normalized.split(/\s+/).filter(w => w.length > 0);
+  const firstWord = words[0] ?? "";
+
+  // Whole food base terms — these are raw/fresh/plain ingredients
+  const wholeFoodTerms = new Set([
+    // Fruits
+    "strawberry","strawberries","blueberry","blueberries","raspberry","raspberries","blackberry","blackberries",
+    "banana","bananas","apple","apples","orange","oranges","grape","grapes","watermelon","cantaloupe","melon",
+    "peach","peaches","plum","plums","pear","pears","cherry","cherries","mango","mangoes","pineapple",
+    "kiwi","kiwis","papaya","fig","figs","lemon","lemons","lime","limes","grapefruit","pomegranate",
+    "avocado","avocados","coconut","dates","prunes","raisins","cranberries","cranberry",
+    // Vegetables
+    "broccoli","spinach","kale","lettuce","cabbage","carrot","carrots","celery","cucumber","cucumbers",
+    "tomato","tomatoes","potato","potatoes","sweet potato","sweet potatoes","onion","onions","garlic",
+    "bell pepper","bell peppers","pepper","peppers","zucchini","squash","pumpkin","corn","peas",
+    "green beans","asparagus","artichoke","beet","beets","radish","turnip","cauliflower","brussels sprouts",
+    "mushroom","mushrooms","eggplant","leek","leeks","arugula","chard","collard greens","bok choy",
+    // Proteins (plain/raw)
+    "chicken","chicken breast","chicken thigh","chicken leg","chicken wing","ground chicken",
+    "beef","ground beef","steak","sirloin","ribeye","brisket","chuck","flank steak",
+    "pork","pork chop","pork loin","bacon","ham","sausage","ground pork",
+    "turkey","ground turkey","turkey breast",
+    "salmon","tuna","tilapia","cod","shrimp","lobster","crab","scallops","halibut","mahi mahi","sardines","anchovies","trout",
+    "lamb","venison","bison","duck","veal",
+    "egg","eggs","egg white","egg whites","egg yolk",
+    // Dairy (plain)
+    "milk","whole milk","skim milk","2% milk","almond milk","oat milk","soy milk","coconut milk",
+    "cheese","cheddar","mozzarella","parmesan","swiss cheese","feta","brie","gouda","ricotta","cottage cheese",
+    "butter","ghee","cream","heavy cream","sour cream","cream cheese","whipped cream",
+    "yogurt","plain yogurt","greek yogurt",
+    // Grains (plain)
+    "rice","white rice","brown rice","jasmine rice","basmati rice","wild rice",
+    "oats","oatmeal","rolled oats","steel cut oats","instant oats",
+    "pasta","spaghetti","penne","fettuccine","linguine","macaroni","noodles",
+    "bread","white bread","wheat bread","sourdough","bagel","pita","tortilla","wrap",
+    "quinoa","barley","farro","bulgur","couscous","millet","buckwheat","amaranth",
+    "flour","wheat flour","all purpose flour","whole wheat flour","cornmeal","cornstarch",
+    // Legumes
+    "lentils","chickpeas","black beans","kidney beans","pinto beans","navy beans","soybeans","edamame",
+    "tofu","tempeh","seitan",
+    // Nuts & seeds
+    "almonds","walnuts","cashews","peanuts","pecans","pistachios","macadamia","hazelnuts","brazil nuts",
+    "sunflower seeds","pumpkin seeds","chia seeds","flaxseed","hemp seeds","sesame seeds",
+    "peanut butter","almond butter","tahini",
+    // Oils & fats
+    "olive oil","coconut oil","vegetable oil","canola oil","avocado oil",
+    // Other whole foods
+    "honey","maple syrup","sugar","brown sugar","salt","pepper","cinnamon",
+    "coffee","tea","water",
+  ]);
+
+  // Descriptors that, when combined with a whole food term, still mean a whole food
+  const wholeFoodDescriptors = new Set([
+    "fresh","raw","frozen","dried","organic","wild","grass-fed","free-range","plain","whole",
+    "cooked","baked","grilled","steamed","boiled","roasted","sauteed","fried","broiled",
+    "sliced","diced","chopped","mashed","pureed","canned","unsalted","salted","unsweetened",
+    "boneless","skinless","lean","extra lean","large","medium","small","ripe",
+  ]);
+
+  // Check if this is a whole food query: all meaningful words are either whole food terms or descriptors
+  const coreWords = words.filter(w => !wholeFoodDescriptors.has(w));
+  const corePhrase = coreWords.join(" ");
+  const isWholeFood = wholeFoodTerms.has(corePhrase) || wholeFoodTerms.has(normalized) ||
+    (coreWords.length === 1 && wholeFoodTerms.has(coreWords[0])) ||
+    (coreWords.length === 2 && wholeFoodTerms.has(coreWords.join(" ")));
+
+  if (isWholeFood) {
+    return { type: "whole_food", coreFood: corePhrase || normalized };
+  }
+
+  // Branded query: first word is not a generic/descriptor term and query has 2+ words
+  const allGenericWords = new Set([...wholeFoodTerms, ...wholeFoodDescriptors,
+    "protein","bar","shake","powder","supplement","drink","snack","meal","food","mix","blend",
+    "low","high","fat","calorie","calories","carb","carbs","sugar","fiber","sodium",
+    "chocolate","vanilla","strawberry","berry","fruit","nut","seed","grain","dairy",
+  ]);
+  const isBrandedQuery = words.length >= 2 && !allGenericWords.has(firstWord) && /^[A-Z]/.test(query.trim().split(/\s+/)[0]);
+
+  if (isBrandedQuery) {
+    return { type: "branded", coreFood: query };
+  }
+
+  return { type: "generic_packaged", coreFood: query };
+}
+
+/**
  * Use Gemini with Google Search grounding to find real product nutrition data.
  * Calls the Gemini API directly with the googleSearch tool enabled.
  */
@@ -41,50 +134,64 @@ async function searchFoodWithGeminiGrounded(query: string, apiKey: string): Prom
   const GEMINI_MODEL = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-  // Detect if the query contains a specific brand name (first word is capitalized / not a generic food word)
-  const genericFoodWords = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","apple","orange","broccoli","spinach","carrot","potato","tomato","onion","garlic","salmon","tuna","turkey","shrimp","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","blueberry","mango"]);
-  const queryWords = query.trim().split(/\s+/);
-  const firstWord = queryWords[0].toLowerCase();
-  const isBrandedQuery = queryWords.length >= 2 && !genericFoodWords.has(firstWord);
+  const { type, coreFood } = classifyFoodQuery(query);
 
-  const brandInstruction = isBrandedQuery
-    ? `CRITICAL: The query "${query}" contains a specific brand name ("${queryWords[0]}"). You MUST return ONLY products from the "${queryWords[0]}" brand. Do NOT return products from any other brand. If you cannot find "${queryWords[0]}" products, return an empty foods array rather than returning a different brand.`
-    : `This is a GENERIC food query. Return the TOP 5 most popular and widely-sold consumer brands for "${query}" in the United States. For example, for "chocolate milk" return brands like Nestle, Hershey, Horizon, TruMoo, Fairlife — NOT generic entries. Each result must include the brand name in the "name" field (e.g. "Nestle Nesquik Chocolate Milk", "Hershey's Chocolate Milk"). Sort by brand popularity/market share.`;
+  let searchInstruction: string;
+  let nameInstruction: string;
+
+  if (type === "whole_food") {
+    searchInstruction = `This is a WHOLE FOOD / PRODUCE query for "${query}". Search USDA FoodData Central and nutrition databases for the plain, unprocessed food item.
+CRITICAL: Return ONLY the plain food itself (e.g. "Strawberries, raw", "Strawberries, fresh", "Strawberries, frozen unsweetened"). 
+Do NOT return any branded products, recipes, meals, or products that merely CONTAIN ${coreFood}.
+Do NOT return yogurt parfaits, cheesecakes, smoothies, or any prepared food — ONLY the raw/fresh/frozen/dried fruit/vegetable/ingredient itself.
+Return 3-5 variations of the plain food (raw, frozen, dried, cooked if applicable).`;
+    nameInstruction = `- name: plain food name with preparation method (e.g. "Strawberries, raw", "Strawberries, frozen, unsweetened")
+- description: "USDA" or "Whole food" or preparation method
+- NEVER include brand names for whole food results`;
+  } else if (type === "branded") {
+    const brandName = query.trim().split(/\s+/)[0];
+    searchInstruction = `CRITICAL: The query "${query}" is a specific brand. You MUST return ONLY products from the "${brandName}" brand.
+Do NOT return products from any other brand. If you cannot find "${brandName}" products, return an empty foods array.`;
+    nameInstruction = `- name: exact product name including brand and flavor/variety
+- description: brand name`;
+  } else {
+    // generic_packaged
+    searchInstruction = `This is a GENERIC PACKAGED FOOD query. Return the TOP 5 most popular and widely-sold consumer brands for "${query}" in the United States.
+Each result must include the brand name in the "name" field (e.g. "Chobani Plain Greek Yogurt", "Fage Total 0% Greek Yogurt"). Sort by brand popularity/market share.`;
+    nameInstruction = `- name: exact product name including brand and flavor/variety (ALWAYS include brand name)
+- description: brand name`;
+  }
 
   const prompt = `You are a nutrition database expert. Use Google Search to look up nutrition facts for: "${query}"
 
-Search for official product pages, nutrition labels, and trusted nutrition databases.
+${searchInstruction}
 
-${brandInstruction}
-
-Return a JSON object with a "foods" array of up to 8 matching products.
+Return a JSON object with a "foods" array of up to 8 matching items.
 
 Each item must have:
-- name: exact product name including brand and flavor/variety (ALWAYS include brand name)
-- description: brand name or brief description
+${nameInstruction}
 - caloriesPer100g: calories per 100 grams (convert from label if needed)
 - proteinPer100g: protein grams per 100g
 - carbsPer100g: carbohydrates grams per 100g  
 - fatPer100g: fat grams per 100g
-- servingSize: the serving size from the label (e.g. "55g", "1 cup (240ml)", "2 scoops (82g)")
+- servingSize: standard serving size (e.g. "1 cup (152g)", "100g", "1 medium (123g)")
 
 IMPORTANT:
 - All macro values MUST be per 100g (normalize from the label serving size)
-- Use REAL nutrition data from the product label, not estimates
-- NEVER return a generic/unbranded result for a product that has well-known brands
+- Use REAL nutrition data from USDA or product labels, not estimates
 - Return ONLY valid JSON, no markdown
 
-Example format:
+Example for whole food:
 {
   "foods": [
     {
-      "name": "Nestle Nesquik Chocolate Milk",
-      "description": "Nestle",
-      "caloriesPer100g": 67,
-      "proteinPer100g": 3.3,
-      "carbsPer100g": 11.3,
-      "fatPer100g": 1.4,
-      "servingSize": "1 cup (240ml)"
+      "name": "Strawberries, raw",
+      "description": "USDA",
+      "caloriesPer100g": 32,
+      "proteinPer100g": 0.7,
+      "carbsPer100g": 7.7,
+      "fatPer100g": 0.3,
+      "servingSize": "1 cup (152g)"
     }
   ]
 }`;
@@ -132,8 +239,8 @@ Example format:
   const foods: FoodVariation[] = Array.isArray(parsed) ? parsed : parsed?.foods;
   if (!Array.isArray(foods)) throw new Error("Response is not an array");
 
-  // Validate and sanitize each food entry
-  return foods
+  // For whole food queries: filter out any branded/prepared products that slipped through
+  let results = foods
     .filter(f => f && typeof f.name === "string" && f.name.trim())
     .map(f => ({
       name: String(f.name).trim(),
@@ -144,8 +251,19 @@ Example format:
       fatPer100g: Math.max(0, Number(f.fatPer100g) || 0),
       servingSize: f.servingSize ? String(f.servingSize).trim() : undefined,
     }))
-    .filter(f => f.caloriesPer100g > 0 || f.proteinPer100g > 0)
-    .slice(0, 8);
+    .filter(f => f.caloriesPer100g > 0 || f.proteinPer100g > 0);
+
+  // For whole food queries, also clear the cache so stale branded results don't persist
+  if (type === "whole_food") {
+    // Sort: plain/raw first, then frozen, then others
+    results = results.sort((a, b) => {
+      const aRaw = /raw|fresh/i.test(a.name) ? 0 : /frozen/i.test(a.name) ? 1 : 2;
+      const bRaw = /raw|fresh/i.test(b.name) ? 0 : /frozen/i.test(b.name) ? 1 : 2;
+      return aRaw - bRaw;
+    });
+  }
+
+  return results.slice(0, 8);
 }
 
 /**
@@ -153,6 +271,16 @@ Example format:
  * Uses training data only — less accurate for very new or niche products.
  */
 async function searchFoodWithLLM(query: string): Promise<FoodVariation[]> {
+  const { type, coreFood } = classifyFoodQuery(query);
+
+  const wholeFoodRule = type === "whole_food"
+    ? `CRITICAL: The query "${query}" is a WHOLE FOOD. Return ONLY the plain food itself (raw, frozen, dried, cooked variations).
+Do NOT return any branded products, recipes, or prepared foods that merely contain ${coreFood}.
+Return USDA-style entries like "Strawberries, raw", "Strawberries, frozen, unsweetened".`
+    : type === "branded"
+    ? `CRITICAL: Return ONLY products from the "${query.trim().split(/\s+/)[0]}" brand.`
+    : `Return the TOP 5 most popular consumer brands for "${query}". Include brand name in each result.`;
+
   try {
     const response = await invokeLLM({
       messages: [
@@ -180,14 +308,16 @@ Rules:
 - All nutritional values must be per 100g
 - Calories should match: (protein*4 + carbs*4 + fat*9) approximately
 
+${wholeFoodRule}
+
 If the query is a BRANDED or PACKAGED product (e.g. "Muscle Milk", "Quest Bar", "Kind Bar", "Clif Bar", "Gatorade", "Premier Protein", etc.):
 - Return the actual product variants (flavors, sizes, formulas) with real nutrition facts from the product label
 - Include the exact brand name and flavor in the "name" field
 - Use accurate macros from the real product — do NOT make up generic values
 - Include the serving size from the product label in the "servingSize" field
 
-If the query is a GENERIC whole food (e.g. "chicken", "rice", "broccoli"):
-- Return variations by cooking method (grilled, baked, raw, fried) and cuts/types
+If the query is a GENERIC whole food (e.g. "chicken", "rice", "broccoli", "strawberries"):
+- Return variations by preparation method (raw, cooked, frozen, dried) and cuts/types
 - Return up to 10 items`,
         },
         {

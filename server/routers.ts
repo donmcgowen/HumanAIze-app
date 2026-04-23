@@ -1530,10 +1530,16 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
         // 1. Check local file cache first (fast, always available)
         // Note: generic USDA cache entries are bypassed for branded-looking queries (handled in getLocalCachedFood)
         // For branded queries (first word is a brand name), ALL cached results must contain the brand word.
-        const genericFoodTerms = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","apple","orange","broccoli","spinach","carrot","potato","tomato","onion","garlic","salmon","tuna","turkey","shrimp","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","blueberry","mango"]);
+        // Whole food descriptors — these words alone don't make a query branded
+        const wholeFoodDescriptors = new Set(["fresh","raw","frozen","dried","organic","wild","plain","whole","cooked","baked","grilled","steamed","boiled","roasted","sliced","diced","chopped","mashed","canned","unsalted","salted","unsweetened","boneless","skinless","lean","extra","large","medium","small","ripe","sweet","baby","mini","low","fat","free","reduced","light"]);
+        const genericFoodTerms = new Set(["chicken","beef","pork","fish","rice","pasta","bread","milk","egg","eggs","cheese","butter","oil","sugar","flour","oats","banana","bananas","apple","apples","orange","oranges","broccoli","spinach","kale","carrot","carrots","potato","potatoes","tomato","tomatoes","onion","onions","garlic","salmon","tuna","tilapia","cod","shrimp","turkey","yogurt","cream","coffee","tea","juice","water","soda","beer","wine","nuts","almonds","peanuts","walnuts","chocolate","vanilla","strawberry","strawberries","blueberry","blueberries","raspberry","raspberries","blackberry","blackberries","mango","mangoes","peach","peaches","grape","grapes","cherry","cherries","pear","pears","plum","plums","kiwi","pineapple","watermelon","cantaloupe","avocado","avocados","lemon","lemons","lime","limes","grapefruit","pomegranate","dates","raisins","cranberries","lettuce","cabbage","celery","cucumber","cucumbers","pepper","peppers","zucchini","squash","pumpkin","corn","peas","asparagus","beet","beets","cauliflower","mushroom","mushrooms","eggplant","quinoa","barley","lentils","chickpeas","tofu","tempeh","lamb","venison","bison","duck","salmon","lobster","crab","scallops","halibut","sardines","trout"]);
         const cacheQueryWords = normalizedQuery.toLowerCase().split(/\s+/).filter(w => w.length > 1);
         const cacheFirstWord = cacheQueryWords[0] ?? "";
-        const isBrandedSearch = cacheQueryWords.length >= 2 && !genericFoodTerms.has(cacheFirstWord);
+        // A query is whole-food if all meaningful (non-descriptor) words are generic food terms
+        const meaningfulCacheWords = cacheQueryWords.filter(w => !wholeFoodDescriptors.has(w));
+        const isWholeFoodSearch = meaningfulCacheWords.length > 0 && meaningfulCacheWords.every(w => genericFoodTerms.has(w));
+        // A query is branded only if: 2+ words, first word is NOT a generic food term or descriptor, and it's not a whole food query
+        const isBrandedSearch = cacheQueryWords.length >= 2 && !genericFoodTerms.has(cacheFirstWord) && !wholeFoodDescriptors.has(cacheFirstWord) && !isWholeFoodSearch;
 
         const cacheIsValid = (names: string[]): boolean => {
           if (isBrandedSearch) {
