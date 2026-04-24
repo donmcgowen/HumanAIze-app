@@ -11,8 +11,8 @@
  */
 
 import { and, eq, gte, lte, lt, desc, sql, or } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
 import { ENV } from "./_core/env";
 import { calculateMacroTargets, calculateTDEE, type FitnessGoal } from "./fitnessGoal";
 
@@ -81,7 +81,6 @@ export type GlucoseReading = {
 };
 
 // ── DB singleton ──────────────────────────────────────────────────────────────
-let _pool: Pool | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
 function getNeonUrl(): string {
@@ -102,10 +101,10 @@ export function getDb() {
   }
   if (!_db) {
     try {
-      _pool = new Pool({ connectionString: url });
-      _db = drizzle(_pool);
+      const sqlClient = neon(url);
+      _db = drizzle(sqlClient);
     } catch (err) {
-      console.error("[db.pg] Failed to create Neon pool:", err);
+      console.error("[db.pg] Failed to create Neon HTTP client:", err);
       return null;
     }
   }
