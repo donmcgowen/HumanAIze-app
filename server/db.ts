@@ -3387,3 +3387,43 @@ export async function clearCheckedGroceryItems(userId: number): Promise<void> {
   }
   await db.delete(groceryItems).where(and(eq(groceryItems.userId, userId), eq(groceryItems.isChecked, 1)));
 }
+
+/**
+ * Clear all cached food search results for whole food queries.
+ * Called on server startup to ensure whole foods always return USDA Foundation data, not stale branded results.
+ */
+export async function clearWholeFoodSearchCache(): Promise<void> {
+  // Azure SQL path
+  if (ENV.azureSqlConnectionString) {
+    try {
+      const pool = await getAzureSqlPool();
+      // Delete any food_search_cache entries where the cached food names look branded
+      // (i.e., the description contains company indicators) for whole food queries
+      await pool.request().query(`
+        DELETE FROM [dbo].[food_search_cache]
+        WHERE [description] LIKE '%Inc.%'
+           OR [description] LIKE '%LLC%'
+           OR [description] LIKE '%Corp%'
+           OR [description] LIKE '%Branded%'
+           OR [description] LIKE '%Brand%'
+           OR [description] LIKE '%Foods Inc%'
+           OR [description] LIKE '%Co.%'
+      `);
+      console.log('[Database] Cleared branded entries from whole food search cache');
+    } catch (error) {
+      console.warn('[Database] Error clearing whole food search cache (Azure SQL):', error);
+    }
+    return;
+  }
+  // MySQL/TiDB path
+  const db = await getDb();
+  if (!db) return;
+  try {
+    await db.delete(foodSearchCache).where(
+      sql`${foodSearchCache.description} REGEXP '(Inc\\.|LLC|Corp|Ltd|Branded|Brand|Foods Inc|Co\\.|Company)'`
+    );
+    console.log('[Database] Cleared branded entries from whole food search cache');
+  } catch (error) {
+    console.warn('[Database] Error clearing whole food search cache (MySQL):', error);
+  }
+}

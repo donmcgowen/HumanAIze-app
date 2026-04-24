@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
-import { healthSources } from "../drizzle/schema";
-import { getDb } from "./db";
+import { healthSources } from "../drizzle/schema.pg";
+import { getDb } from "./db.pg";
 import { authenticateDexcom, verifyDexcomToken } from "./dexcomAuth";
 
 /**
@@ -14,7 +14,7 @@ export async function storeSourceCredentials(
   credentials: Record<string, string>
 ) {
   console.log(`[storeSourceCredentials] Starting for user ${userId}, source ${sourceId}`);
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   // Validate required fields based on source type
@@ -31,12 +31,12 @@ export async function storeSourceCredentials(
   const sourceRecord = source[0];
 
   // Validate credentials based on source type
-  console.log(`[storeSourceCredentials] Validating credentials for ${sourceRecord.displayName}`);
-  validateCredentials(sourceRecord.displayName, credentials);
+  console.log(`[storeSourceCredentials] Validating credentials for ${sourceRecord.displayName ?? ''}`);
+  validateCredentials(sourceRecord.displayName ?? '', credentials);
 
   // Test credentials against the provider's API
-  console.log(`[storeSourceCredentials] Testing credentials for ${sourceRecord.displayName}...`);
-  const isValid = await testSourceCredentials(sourceRecord.displayName, credentials);
+  console.log(`[storeSourceCredentials] Testing credentials for ${sourceRecord.displayName ?? ''}...`);
+  const isValid = await testSourceCredentials(sourceRecord.displayName ?? '', credentials);
   if (!isValid) {
     console.error(`[storeSourceCredentials] Credential validation failed for ${sourceRecord.displayName}`);
     throw new Error(
@@ -46,8 +46,8 @@ export async function storeSourceCredentials(
   console.log(`[storeSourceCredentials] ✓ Credentials validated for ${sourceRecord.displayName}`);
 
   // Store credentials encrypted in metadata
-  const existingMetadata = (sourceRecord.metadata as Record<string, any>) || {};
-  const sourceKey = (sourceRecord.displayName || "").toLowerCase().replace(/\s+/g, "-");
+  const existingMetadata = (sourceRecord.metadata ? JSON.parse(sourceRecord.metadata as string) : {}) as Record<string, any>;
+  const sourceKey = (sourceRecord.displayName ?? "").toLowerCase().replace(/\s+/g, "-");
   const baseSourceKey = sourceKey.split("-")[0];
   
   // For Dexcom, exchange username/password for access token
@@ -88,7 +88,7 @@ export async function storeSourceCredentials(
       storedAt: new Date().toISOString(),
       validatedAt: new Date().toISOString(),
     },
-    credentialType: getCredentialType(sourceRecord.displayName),
+    credentialType: getCredentialType(sourceRecord.displayName ?? ''),
     credentialStatus: "valid",
   };
 
@@ -99,7 +99,7 @@ export async function storeSourceCredentials(
       status: "connected",
       lastSyncStatus: "success",
       lastError: null,
-      metadata,
+      metadata: JSON.stringify(metadata),
       lastSyncAt: Date.now(),
     })
     .where(and(eq(healthSources.userId, userId), eq(healthSources.id, sourceId)));
@@ -115,7 +115,7 @@ export async function storeSourceCredentials(
  * In production, this would decrypt the credentials.
  */
 export async function getSourceCredentials(userId: number, sourceId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const source = await db
@@ -128,7 +128,7 @@ export async function getSourceCredentials(userId: number, sourceId: number) {
     return null;
   }
 
-  const metadata = (source[0].metadata as Record<string, any>) || {};
+  const metadata = (source[0].metadata ? JSON.parse(source[0].metadata as string) : {}) as Record<string, any>;
   return metadata?.credentials || null;
 }
 

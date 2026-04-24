@@ -1,4 +1,4 @@
-import { getDb } from "./db";
+import { getDb } from "./db.pg";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -23,7 +23,7 @@ import {
 } from "./healthEngine";
 import { storeSourceCredentials } from "./credentials";
 import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource, getGroceryItems, addGroceryItem, bulkReplaceGroceryItems, updateGroceryItemChecked, deleteGroceryItem, clearCheckedGroceryItems } from "./db";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource, getGroceryItems, addGroceryItem, bulkReplaceGroceryItems, updateGroceryItemChecked, deleteGroceryItem, clearCheckedGroceryItems } from "./db.pg";
 import { searchUSDAFoods, searchUSDABrandedFoods, searchUSDAFoundationFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant, getDefaultUnit } from "./barcode";
@@ -1879,11 +1879,11 @@ Respond ONLY with a JSON array, no markdown:
       
       const fs = await import('fs');
       const path = await import('path');
-      const { getDb } = await import('./db');
+      const { getDb } = await import('./db.pg');
       
       try {
         // Get database connection
-        const database = await getDb();
+        const database = getDb();
         if (!database) {
           throw new Error('Database connection not available');
         }

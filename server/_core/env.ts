@@ -16,12 +16,15 @@ export const ENV = {
   llmModel: process.env.LLM_MODEL ?? "gpt-4o-mini",
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
 
+  // Neon PostgreSQL
+  neonDatabaseUrl: process.env.NEON_DATABASE_URL ?? process.env.DATABASE_URL ?? "",
+
   // Azure infrastructure
   azureStorageAccountName: process.env.AZURE_STORAGE_ACCOUNT_NAME ?? "",
   azureStorageContainerName: process.env.AZURE_STORAGE_CONTAINER_NAME ?? "",
   azureStorageAccountKey: process.env.AZURE_STORAGE_ACCOUNT_KEY ?? "",
   azureSqlConnectionString: process.env.AZURE_SQL_CONNECTION_STRING ?? "",
-  databaseUrl: (process.env.DATABASE_URL || process.env.AZURE_SQL_CONNECTION_STRING) ?? "",
+  databaseUrl: (process.env.NEON_DATABASE_URL || process.env.DATABASE_URL || process.env.AZURE_SQL_CONNECTION_STRING) ?? "",
 
   // Open Food Facts
   openFoodFactsEnvironment: process.env.OPENFOODFACTS_ENVIRONMENT ?? "production", // production | staging

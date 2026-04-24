@@ -11,8 +11,8 @@ import {
   sleepSessions,
   syncJobs,
   weeklySummaries,
-} from "../drizzle/schema";
-import { getDb, getUserProfile } from "./db";
+} from "../drizzle/schema.pg";
+import { getDb, getUserProfile } from "./db.pg";
 import { invokeLLM } from "./_core/llm";
 
 const DAY_MS = 86_400_000;
@@ -64,7 +64,7 @@ function summarizeStatus(statuses: string[]) {
 }
 
 export async function ensureSeedDataForUser(userId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     throw new Error("Database is not available.");
   }
@@ -74,8 +74,11 @@ export async function ensureSeedDataForUser(userId: number) {
   if (sources.length === 0) {
     const now = Date.now();
     await db.insert(healthSources).values(
-      SOURCE_BLUEPRINTS.map((source, index) => ({
+      SOURCE_BLUEPRINTS.map((source) => ({
         userId,
+        sourceType: source.category,
+        sourceName: source.displayName,
+        recordedAt: Date.now(),
         provider: source.provider,
         category: source.category,
         status: source.status,
@@ -85,12 +88,12 @@ export async function ensureSeedDataForUser(userId: number) {
         description: source.description,
         lastSyncAt: null,
         lastSyncStatus: "idle" as const,
-        metadata: {
+        metadata: JSON.stringify({
           supportedMetrics:
             source.provider === "dexcom" || source.provider === "custom_app"
               ? ["glucose", "trend"]
               : ["status"],
-        },
+        }),
       }))
     );
 
@@ -114,15 +117,15 @@ export async function ensureSeedDataForUser(userId: number) {
 
 export async function getSourcesForUser(userId: number) {
   await ensureSeedDataForUser(userId);
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const sources = await db.select().from(healthSources).where(eq(healthSources.userId, userId));
-  return sources.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return sources.sort((a, b) => (a.displayName ?? '').localeCompare(b.displayName ?? ''));
 }
 
 export async function connectSource(userId: number, sourceId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   await db
@@ -132,7 +135,7 @@ export async function connectSource(userId: number, sourceId: number) {
       lastSyncStatus: "pending",
       lastError: null,
       lastSyncAt: Date.now(),
-      metadata: { connectedByUser: true },
+      metadata: JSON.stringify({ connectedByUser: true }),
     })
     .where(and(eq(healthSources.userId, userId), eq(healthSources.id, sourceId)));
 
@@ -142,7 +145,7 @@ export async function connectSource(userId: number, sourceId: number) {
 }
 
 export async function disconnectSource(userId: number, sourceId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   await db
@@ -162,7 +165,7 @@ export async function disconnectSource(userId: number, sourceId: number) {
 }
 
 export async function triggerSourceSync(userId: number, sourceId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   await db.insert(syncJobs).values({
@@ -190,7 +193,7 @@ export async function triggerSourceSync(userId: number, sourceId: number) {
 
 async function getMetricWindow(userId: number, rangeDays: number) {
   await ensureSeedDataForUser(userId);
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const since = startOfDay(Date.now() - (rangeDays - 1) * DAY_MS);
@@ -252,17 +255,17 @@ export async function getDashboardBundle(userId: number, rangeDays: number) {
   }
 
   metrics.glucose.forEach((reading) => {
-    const key = startOfDay(reading.readingAt);
+    const key = startOfDay(reading.readingAt ?? 0);
     const bucket = dailyMap.get(key);
     if (bucket) bucket.glucoseValues.push(Number(reading.mgdl));
   });
 
   metrics.activity.forEach((sample) => {
-    const key = startOfDay(sample.sampleDate);
+    const key = startOfDay(sample.sampleDate ?? 0);
     const bucket = dailyMap.get(key);
     if (!bucket) return;
-    bucket.steps += sample.steps;
-    bucket.activeMinutes += sample.activeMinutes;
+    bucket.steps += sample.steps ?? 0;
+    bucket.activeMinutes += sample.activeMinutes ?? 0;
   });
 
   metrics.nutrition.forEach((meal) => {
@@ -270,8 +273,8 @@ export async function getDashboardBundle(userId: number, rangeDays: number) {
     const bucket = dailyMap.get(key);
     if (!bucket) return;
     bucket.calories += meal.calories;
-    bucket.carbs += Number(meal.carbs);
-    bucket.protein += Number(meal.protein);
+    bucket.carbs += Number(meal.carbsGrams ?? 0);
+    bucket.protein += Number(meal.proteinGrams ?? 0);
   });
 
   metrics.sleep.forEach((session) => {
@@ -352,7 +355,7 @@ export async function getDashboardBundle(userId: number, rangeDays: number) {
       stepsAverage,
       caloriesAverage,
       connectedSourceCount: metrics.sources.filter((source) => source.status === "connected").length,
-      syncState: summarizeStatus(metrics.sources.map((source) => source.lastSyncStatus)),
+      syncState: summarizeStatus(metrics.sources.map((source) => source.lastSyncStatus).filter((s): s is string => s !== null)),
     },
     insights: metrics.insights.slice(0, 4),
     sourcesByCategory: {
@@ -383,14 +386,14 @@ export async function getHistoryBundle(userId: number, rangeDays: number) {
 
 export async function listChatThreads(userId: number) {
   await ensureSeedDataForUser(userId);
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
   return db.select().from(chatThreads).where(eq(chatThreads.userId, userId)).orderBy(desc(chatThreads.updatedAt));
 }
 
 export async function getThreadMessages(userId: number, threadId?: number) {
   await ensureSeedDataForUser(userId);
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   let targetThreadId = threadId;
@@ -414,14 +417,14 @@ export async function getThreadMessages(userId: number, threadId?: number) {
 }
 
 export async function createChatThread(userId: number, title?: string) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const insertResult = await db.insert(chatThreads).values({
     userId,
     title: title?.trim() || "New health conversation",
-  });
-  const threadId = Number(insertResult[0].insertId);
+  }).returning({ id: chatThreads.id });
+  const threadId = Number(insertResult[0].id);
 
   return getThreadMessages(userId, threadId);
 }
@@ -440,7 +443,7 @@ function buildAssistantContext(chart: Awaited<ReturnType<typeof getDashboardBund
 }
 
 export async function sendChatMessage(userId: number, threadId: number, prompt: string) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const existing = await getThreadMessages(userId, threadId);
@@ -450,7 +453,7 @@ export async function sendChatMessage(userId: number, threadId: number, prompt: 
     threadId,
     role: "user",
     content: prompt,
-    citedMetricWindow: { rangeDays: 14 },
+    citedMetricWindow: JSON.stringify({ rangeDays: 14 }),
   });
 
   const contextPayload = buildAssistantContext(dashboard.chart);
@@ -482,7 +485,7 @@ export async function sendChatMessage(userId: number, threadId: number, prompt: 
     threadId,
     role: "assistant",
     content: assistantContent,
-    citedMetricWindow: { rangeDays: 14, lastUpdatedAt: Date.now() },
+    citedMetricWindow: JSON.stringify({ rangeDays: 14, lastUpdatedAt: Date.now() }),
   });
 
   await db.update(chatThreads).set({ updatedAt: new Date() }).where(eq(chatThreads.id, threadId));
@@ -529,7 +532,7 @@ export async function buildWeeklySummary(userId: number) {
 }
 
 export async function refreshWeeklySummary(userId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const summary = await buildWeeklySummary(userId);
@@ -540,7 +543,7 @@ export async function refreshWeeklySummary(userId: number) {
     subject: summary.subject,
     summaryMarkdown: summary.summaryMarkdown,
     deliveryStatus: "needs_email_provider",
-    generationContext: summary.generationContext,
+    generationContext: JSON.stringify(summary.generationContext),
   });
 
   return db.select().from(weeklySummaries).where(eq(weeklySummaries.userId, userId)).orderBy(desc(weeklySummaries.weekEndAt));
@@ -548,7 +551,7 @@ export async function refreshWeeklySummary(userId: number) {
 
 export async function getSummaries(userId: number) {
   await ensureSeedDataForUser(userId);
-  const db = await getDb();
+  const db = getDb();
   if (!db) throw new Error("Database is not available.");
 
   const summaries = await db.select().from(weeklySummaries).where(eq(weeklySummaries.userId, userId)).orderBy(desc(weeklySummaries.weekEndAt));
@@ -566,7 +569,7 @@ export async function getSummaries(userId: number) {
  * Custom sources allow users to connect any health data source with custom credentials.
  */
 export async function createCustomSource(userId: number, appName: string, category: string) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     throw new Error("Database is not available.");
   }
@@ -574,6 +577,9 @@ export async function createCustomSource(userId: number, appName: string, catego
   // Create a new custom app source
   const result = await db.insert(healthSources).values({
     userId,
+    sourceType: category,
+    sourceName: appName,
+    recordedAt: Date.now(),
     provider: "custom_app",
     category: category as any,
     status: "ready",
@@ -581,10 +587,10 @@ export async function createCustomSource(userId: number, appName: string, catego
     authType: "custom",
     displayName: appName,
     description: `Custom app: ${appName}`,
-    metadata: {
+    metadata: JSON.stringify({
       isUserCreated: true,
       createdAt: new Date().toISOString(),
-    },
+    }),
   });
 
   // Return the created source
@@ -598,7 +604,7 @@ export async function createCustomSource(userId: number, appName: string, catego
  * This is a one-time maintenance function.
  */
 export async function cleanupDuplicateCustomSources() {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     throw new Error("Database is not available.");
   }
@@ -635,7 +641,7 @@ export async function cleanupDuplicateCustomSources() {
         for (const source of toDelete) {
           await db.delete(healthSources).where(eq(healthSources.id, source.id));
           console.log(`[Cleanup] Deleted source ${source.id} ("${source.displayName}")`);
-          deletedSources.push({ userId, id: source.id, displayName: source.displayName });
+          deletedSources.push({ userId, id: source.id, displayName: source.displayName ?? '' });
           totalDeleted++;
         }
       }
@@ -655,7 +661,7 @@ export async function cleanupDuplicateCustomSources() {
  * This updates all custom_app sources with displayName "Custom App" to "Connect App"
  */
 export async function migrateCustomAppToConnectApp() {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     throw new Error("Database is not available.");
   }

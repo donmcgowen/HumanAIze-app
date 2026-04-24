@@ -1,5 +1,5 @@
-import { glucoseReadings, activitySamples, nutritionLogs, syncJobs, healthSources } from "../drizzle/schema";
-import { getDb } from "./db";
+import { glucoseReadings, activitySamples, nutritionLogs, syncJobs, healthSources } from "../drizzle/schema.pg";
+import { getDb } from "./db.pg";
 import { eq } from "drizzle-orm";
 
 /**
@@ -71,7 +71,7 @@ export async function importDexcomGlucose(
     }
 
     // Normalize and insert glucose readings
-    const db = await getDb();
+    const db = getDb();
     if (!db) {
       throw new Error("Database not available");
     }
@@ -86,17 +86,13 @@ export async function importDexcomGlucose(
       notes: null as string | null,
     }));
 
-    // Upsert readings (avoid duplicates by recordId)
+    // Insert readings (skip duplicates)
     for (const reading of readings) {
-      await db
-        .insert(glucoseReadings)
-        .values(reading)
-        .onDuplicateKeyUpdate({
-          set: {
-            mgdl: reading.mgdl,
-            trend: reading.trend,
-          },
-        });
+      try {
+        await db.insert(glucoseReadings).values(reading);
+      } catch (_e) {
+        // duplicate - skip
+      }
     }
 
     return {
@@ -173,7 +169,7 @@ export async function importGlookoData(
     }
 
     // Normalize and insert glucose readings
-    const db = await getDb();
+    const db = getDb();
     if (!db) {
       throw new Error("Database not available");
     }
@@ -188,17 +184,13 @@ export async function importGlookoData(
       notes: record.notes || null,
     }));
 
-    // Upsert readings
+    // Insert readings (skip duplicates)
     for (const reading of readings) {
-      await db
-        .insert(glucoseReadings)
-        .values(reading)
-        .onDuplicateKeyUpdate({
-          set: {
-            mgdl: reading.mgdl,
-            notes: reading.notes,
-          },
-        });
+      try {
+        await db.insert(glucoseReadings).values(reading);
+      } catch (_e) {
+        // duplicate - skip
+      }
     }
 
     return {
@@ -238,7 +230,7 @@ export async function importFitbitActivity(
   }
 
   try {
-    const db = await getDb();
+    const db = getDb();
     if (!db) {
       throw new Error("Database not available");
     }
@@ -286,19 +278,13 @@ export async function importFitbitActivity(
         userId,
         sourceId,
         sampleDate,
+        recordedAt: sampleDate,
         steps: data.summary.steps,
         activeMinutes: data.summary.activeMinutes,
         caloriesBurned: Math.round(data.summary.caloriesBurned),
         workoutMinutes: 0,
         distanceKm: data.summary.distance / 1000,
         sourceLabel: "Fitbit",
-      })
-      .onDuplicateKeyUpdate({
-        set: {
-          steps: data.summary.steps,
-          activeMinutes: data.summary.activeMinutes,
-          caloriesBurned: Math.round(data.summary.caloriesBurned),
-        },
       });
 
     return {
@@ -320,7 +306,7 @@ export async function importFitbitActivity(
  * Sync all connected sources for a user
  */
 export async function syncAllSources(userId: number): Promise<void> {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     throw new Error("Database not available");
   }

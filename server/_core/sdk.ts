@@ -3,8 +3,8 @@ import { ForbiddenError } from "@shared/_core/errors";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify, decodeJwt } from "jose";
-import type { User } from "../../drizzle/schema";
-import * as db from "../db";
+import type { User } from "../../drizzle/schema.pg";
+import * as db from "../db.pg";
 import { ENV } from "./env";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

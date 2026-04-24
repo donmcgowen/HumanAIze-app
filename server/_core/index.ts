@@ -28,7 +28,7 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { startBackgroundSync } from "../backgroundSync";
-import { getDatabaseHealth, clearAllFoodSearchCache } from "../db";
+import { getDatabaseHealth, clearAllFoodSearchCache } from "../db.pg";
 import { getAuthBackendHealth } from "../auth";
 import { clearGenericCacheEntries, clearAllCacheEntries } from "../localFoodCache";
 

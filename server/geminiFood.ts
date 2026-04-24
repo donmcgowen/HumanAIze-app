@@ -112,7 +112,7 @@ function classifyFoodQuery(query: string): { type: "whole_food" | "branded" | "g
   }
 
   // Branded query: first word is not a generic/descriptor term and query has 2+ words
-  const allGenericWords = new Set([...wholeFoodTerms, ...wholeFoodDescriptors,
+  const allGenericWords = new Set([...Array.from(wholeFoodTerms), ...Array.from(wholeFoodDescriptors),
     "protein","bar","shake","powder","supplement","drink","snack","meal","food","mix","blend",
     "low","high","fat","calorie","calories","carb","carbs","sugar","fiber","sodium",
     "chocolate","vanilla","strawberry","berry","fruit","nut","seed","grain","dairy",

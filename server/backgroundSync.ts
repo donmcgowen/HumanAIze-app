@@ -1,7 +1,7 @@
 import cron from "node-cron";
-import { getDb } from "./db";
+import { getDb } from "./db.pg";
 import { eq } from "drizzle-orm";
-import { healthSources, syncJobs } from "../drizzle/schema";
+import { healthSources, syncJobs } from "../drizzle/schema.pg";
 import { importDexcomGlucose, importGlookoData, importFitbitActivity } from "./dataImport";
 
 /**
@@ -55,7 +55,7 @@ export async function stopBackgroundSync(): Promise<void> {
  * Perform sync for all users and all their connected sources
  */
 async function performGlobalSync(): Promise<void> {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     console.warn("[BackgroundSync] Database not available");
     return;
@@ -131,7 +131,7 @@ async function syncUserSources(
   userId: number,
   sources: typeof healthSources.$inferSelect[]
 ): Promise<void> {
-  const db = await getDb();
+  const db = getDb();
   if (!db) return;
 
   for (const source of sources) {

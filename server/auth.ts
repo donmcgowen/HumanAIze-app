@@ -1,7 +1,7 @@
 import bcryptjs from "bcryptjs";
-import { users } from "../drizzle/schema";
+import { users } from "../drizzle/schema.pg";
 import { eq, or } from "drizzle-orm";
-import { getDb } from "./db";
+import { getDb } from "./db.pg";
 import { getAzureSqlPool } from "./azureDb";
 import { ENV } from "./_core/env";
 
@@ -181,9 +181,9 @@ async function findSqlUserByUsernameOrEmail(username: string, email: string) {
 }
 
 export async function getAuthBackendHealth() {
-  const mysqlDb = await getDb();
+  const mysqlDb = getDb();
   if (mysqlDb) {
-    return { ok: true, mode: "mysql" as const };
+    return { ok: true, mode: "neon" as const };
   }
 
   const sqlPool = await getSqlAuthPool();
@@ -218,7 +218,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
  * Create a new user account with username and password
  */
 export async function createUser(username: string, email: string, password: string, name?: string) {
-  const db = await getDb();
+  const db = getDb();
 
   const passwordHash = await hashPassword(password);
 
@@ -355,7 +355,7 @@ export async function createUser(username: string, email: string, password: stri
  * Authenticate a user with username and password
  */
 export async function authenticateUser(username: string, password: string) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     const pool = await getSqlAuthPool();
     if (!pool) {
@@ -474,7 +474,7 @@ export async function authenticateUser(username: string, password: string) {
  * Get user by ID
  */
 export async function getUserById(userId: number) {
-  const db = await getDb();
+  const db = getDb();
   if (!db) {
     const pool = await getSqlAuthPool();
     if (!pool) {
@@ -536,8 +536,8 @@ export async function getUserById(userId: number) {
 /**
  * Update a user's email address
  */
-export async function updateUserEmail(userId: number, email: string) {
-  const db = await getDb();
+export async function updateUserEmail(userId: number, newEmail: string) {
+  const db = getDb();
   if (!db) {
     const pool = await getSqlAuthPool();
     if (!pool) {
@@ -552,7 +552,7 @@ export async function updateUserEmail(userId: number, email: string) {
 
       const existingEmailResult = await pool
         .request()
-        .input("email", email)
+        .input("email", newEmail)
         .input("userId", userId)
         .query<{ id: number }>(
           `SELECT TOP 1 ${quoteIdent(columns.id)} AS [id]
@@ -568,7 +568,7 @@ export async function updateUserEmail(userId: number, email: string) {
       await pool
         .request()
         .input("userId", userId)
-        .input("email", email)
+        .input("email", newEmail)
         .query(
           `UPDATE [users]
            SET ${quoteIdent(columns.email)} = @email
@@ -593,7 +593,7 @@ export async function updateUserEmail(userId: number, email: string) {
     const existingByEmail = await db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, email))
+      .where(eq(users.email, newEmail))
       .limit(1)
       .execute();
 
@@ -603,7 +603,7 @@ export async function updateUserEmail(userId: number, email: string) {
 
     await db
       .update(users)
-      .set({ email, updatedAt: new Date() })
+      .set({ email: newEmail, updatedAt: new Date() })
       .where(eq(users.id, userId))
       .execute();
 
