@@ -59,13 +59,21 @@ function looksLikeBrandedQuery(query: string): boolean {
   return false;
 }
 
-export async function getLocalCachedFood(query: string): Promise<CachedFoodEntry[] | null> {
+export async function getLocalCachedFood(query: string, isWholeFoodQuery = false): Promise<CachedFoodEntry[] | null> {
   const store = await readCache();
   const key = query.toLowerCase().trim();
   const record = store[key];
   if (!record) return null;
   if (Date.now() > record.expiresAt) {
     // Expired — remove it
+    delete store[key];
+    await writeCache(store);
+    return null;
+  }
+
+  // For whole-food queries: never serve Gemini-sourced cache — always use USDA for authoritative data
+  if (isWholeFoodQuery && record.source === "gemini") {
+    console.log(`[LocalFoodCache] Bypassing Gemini cache for whole-food query: "${query}"`);
     delete store[key];
     await writeCache(store);
     return null;

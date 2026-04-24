@@ -1563,7 +1563,7 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
           return names.some(n => cacheQueryWords.some(w => n.toLowerCase().includes(w)));
         };
 
-        const localCached = await getLocalCachedFood(normalizedQuery);
+        const localCached = await getLocalCachedFood(normalizedQuery, isWholeFoodSearch);
         if (localCached && localCached.length > 0) {
           if (cacheIsValid(localCached.map(r => r.name), localCached.map(r => r.description || ""))) {
             return localCached.slice(0, 5);
@@ -1576,8 +1576,15 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
         // 2. Check DB cache if available — apply relevance quality check to prevent stale results
         const dbCached = await getCachedFoodSearchResults(normalizedQuery);
         if (dbCached.length > 0) {
-          if (cacheIsValid(dbCached.map(c => c.foodName || ""), dbCached.map(c => c.description || ""))) {
+          // For whole-food queries: reject any DB cache entry sourced from Gemini — always re-fetch from USDA
+          const hasGeminiSource = dbCached.some(c => c.source === "gemini");
+          if (isWholeFoodSearch && hasGeminiSource) {
+            console.log(`[Food Search] Whole food query has Gemini-sourced DB cache — bypassing cache and re-fetching from USDA for "${normalizedQuery}"`);
+            await clearLocalCachedFood(normalizedQuery);
+            // Fall through to USDA lookup below
+          } else if (cacheIsValid(dbCached.map(c => c.foodName || ""), dbCached.map(c => c.description || ""))) {
             console.log(`[Food Search] DB cache hit for query: "${normalizedQuery}" (${dbCached.length} results)`);
+            const cacheSource = isWholeFoodSearch ? "usda_generic" : "branded";
             const mapped = dbCached.map(c => ({
               name: c.foodName,
               description: c.description || "",
@@ -1587,13 +1594,14 @@ Focus on meals that fill the remaining macro gaps. If glucose is high, suggest l
               fatPer100g: c.fatGrams,
               servingSize: c.servingSize || "100g",
             })).slice(0, 5);
-            await saveLocalCachedFood(normalizedQuery, mapped, "branded");
+            await saveLocalCachedFood(normalizedQuery, mapped, cacheSource);
             return mapped;
+          } else {
+            // Cache has stale/wrong-brand results — delete from DB too by overwriting with empty
+            console.log(`[Food Search] DB cache quality check failed for "${normalizedQuery}" (branded: ${isBrandedSearch}) — clearing stale DB + local cache`);
+            await clearLocalCachedFood(normalizedQuery);
+            // Proceed to fresh search
           }
-          // Cache has stale/wrong-brand results — delete from DB too by overwriting with empty
-          console.log(`[Food Search] DB cache quality check failed for "${normalizedQuery}" (branded: ${isBrandedSearch}) — clearing stale DB + local cache`);
-          await clearLocalCachedFood(normalizedQuery);
-          // Proceed to Gemini to get fresh correct results (they will overwrite the DB cache at the end)
         }
 
         // 3. Cache miss — route based on query type

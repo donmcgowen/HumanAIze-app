@@ -525,7 +525,7 @@ function SearchFoodTab({ onFoodAdded, onClose, mealType = "meal" }: SearchFoodTa
           {debouncedQuery.trim().length <= 2
             ? "Type a food or brand name — results update as you type"
             : isLoading
-              ? "Searching with Gemini AI..."
+              ? (isGenericQuery(effectiveQuery) ? "Searching USDA nutrition database..." : "Searching with Gemini AI...")
               : brandFilter
                 ? `Showing ${brandFilter} results`
                 : "Search any food, brand, or supplement"}

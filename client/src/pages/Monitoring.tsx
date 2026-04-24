@@ -106,11 +106,6 @@ export function Monitoring() {
           <BodyMeasurementSection />
         </div>
 
-        {/* Manual Glucose Entry Section */}
-        <div className="mb-6">
-          <ManualGlucoseSection />
-        </div>
-
         {/* Steps Section */}
         <div className="mb-6">
           <h2 className="text-xl font-semibold text-white mb-3 flex items-center gap-2">
@@ -118,6 +113,11 @@ export function Monitoring() {
             Steps
           </h2>
           <StepCounter onTotalChange={handleStepUpdate} />
+        </div>
+
+        {/* Manual Glucose Entry Section */}
+        <div className="mb-6">
+          <ManualGlucoseSection />
         </div>
 
         {/* Dexcom Clarity Summary Cards */}
