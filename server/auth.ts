@@ -330,21 +330,26 @@ export async function createUser(username: string, email: string, password: stri
         loginMethod: "custom",
         lastSignedIn: new Date(),
       })
+      .returning({ id: users.id })
       .execute();
 
+    const newUserId = result?.[0]?.id;
     return {
       success: true,
-      userId: (result as any).insertId,
+      userId: newUserId,
       message: "Account created successfully",
     };
   } catch (error: any) {
-    if (error.code === "ER_DUP_ENTRY") {
-      if (error.message.includes("username")) {
+    // PostgreSQL unique constraint violation code is '23505'
+    if (error.code === "23505" || error.code === "ER_DUP_ENTRY") {
+      const msg = String(error.message || "").toLowerCase();
+      if (msg.includes("username")) {
         return { success: false, message: "Username already exists" };
       }
-      if (error.message.includes("email")) {
+      if (msg.includes("email")) {
         return { success: false, message: "Email already exists" };
       }
+      return { success: false, message: "Account already exists" };
     }
     console.error("[Auth] Create user error:", error);
     return { success: false, message: "Failed to create account" };
@@ -613,7 +618,7 @@ export async function updateUserEmail(userId: number, newEmail: string) {
       user: updated,
     };
   } catch (error: any) {
-    if (error?.code === "ER_DUP_ENTRY") {
+    if (error?.code === "23505" || error?.code === "ER_DUP_ENTRY") {
       return { success: false, message: "Email already exists" };
     }
     console.error("[Auth] Update email error:", error);
