@@ -1,7 +1,16 @@
 import { Resend } from "resend";
 import { ENV } from "./_core/env";
 
-const resend = new Resend(ENV.resendApiKey);
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!ENV.resendApiKey) {
+    throw new Error("RESEND_API_KEY is not configured — email sending is disabled");
+  }
+  if (!_resend) {
+    _resend = new Resend(ENV.resendApiKey);
+  }
+  return _resend;
+}
 
 const FROM_ADDRESS = "HumanAIze <support@humanaize.life>";
 
@@ -20,7 +29,7 @@ export interface SendEmailOptions {
 export async function sendEmail(options: SendEmailOptions): Promise<{ id: string }> {
   const { to, subject, html, text, replyTo } = options;
 
-  const result = await resend.emails.send({
+  const result = await getResend().emails.send({
     from: FROM_ADDRESS,
     to: Array.isArray(to) ? to : [to],
     subject,
