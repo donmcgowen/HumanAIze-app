@@ -351,7 +351,10 @@ export async function createUser(username: string, email: string, password: stri
       }
       return { success: false, message: "Account already exists" };
     }
-    console.error("[Auth] Create user error:", error);
+    const errMsg2 = error instanceof Error ? error.message : String(error);
+    const errStack2 = error instanceof Error ? (error.stack ?? '') : '';
+    console.error("[Auth] Create user error (Neon):", errMsg2);
+    console.error("[Auth] Create user stack:", errStack2);
     return { success: false, message: "Failed to create account" };
   }
 }
@@ -470,7 +473,10 @@ export async function authenticateUser(username: string, password: string) {
       },
     };
   } catch (error) {
-    console.error("[Auth] Authentication error:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    const errStack = error instanceof Error ? (error.stack ?? '') : '';
+    console.error("[Auth] Authentication error (Neon):", errMsg);
+    console.error("[Auth] Authentication stack:", errStack);
     return { success: false, message: "Authentication failed" };
   }
 }
