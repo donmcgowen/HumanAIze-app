@@ -1,10 +1,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, FileText, FileUp, Loader2, AlertCircle, CheckCircle, Activity, Brain, TrendingUp } from "lucide-react";
+import { Upload, FileText, FileUp, Loader2, AlertCircle, CheckCircle, Activity, Brain } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import * as pdfjsLib from "pdfjs-dist";
 
 // Configure PDF.js worker - use CDN URL to avoid Vite bundling issues with the worker file
@@ -17,8 +16,7 @@ export function CGMSection() {
   const utils = trpc.useUtils();
 
   const { data: stats, isLoading: statsLoading } = trpc.cgm.getStats.useQuery({ days: 30 });
-  const { data: dailyAvgs, isLoading: chartLoading } = trpc.cgm.getDailyAverages.useQuery({ days: 7 });
-  const { data: insights, isLoading: insightsLoading } = trpc.cgm.getInsights.useQuery();
+const { data: insights, isLoading: insightsLoading } = trpc.cgm.getInsights.useQuery();
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -199,44 +197,6 @@ export function CGMSection() {
         </Card>
       ) : stats ? (
         <>
-          {/* 7-Day Chart */}
-          <Card className="border border-white/10 bg-slate-950">
-            <CardHeader>
-              <CardTitle className="text-white flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-cyan-400" />
-                7-Day Blood Sugar Trend
-              </CardTitle>
-              <CardDescription>Daily average glucose with reference lines for target range</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {chartLoading ? (
-                <div className="flex items-center justify-center h-48">
-                  <Loader2 className="h-5 w-5 animate-spin text-cyan-400" />
-                </div>
-              ) : dailyAvgs && dailyAvgs.length > 0 ? (
-                <ResponsiveContainer width="100%" height={260}>
-                  <LineChart data={dailyAvgs} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                    <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 12 }} />
-                    <YAxis stroke="#64748b" tick={{ fontSize: 12 }} domain={[40, "auto"]} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: 8 }}
-                      labelStyle={{ color: "#e2e8f0" }}
-                      formatter={(value: any, name: string) => [`${value} mg/dL`, name === "avg" ? "Avg" : name === "min" ? "Min" : "Max"]}
-                    />
-                    <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="4 4" label={{ value: "70", fill: "#ef4444", fontSize: 10 }} />
-                    <ReferenceLine y={180} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "180", fill: "#f59e0b", fontSize: 10 }} />
-                    <Line type="monotone" dataKey="min" stroke="#3b82f6" strokeWidth={1} dot={false} name="min" />
-                    <Line type="monotone" dataKey="avg" stroke="#06b6d4" strokeWidth={2.5} dot={{ r: 4, fill: "#06b6d4" }} name="avg" />
-                    <Line type="monotone" dataKey="max" stroke="#f59e0b" strokeWidth={1} dot={false} name="max" />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <p className="text-slate-500 text-sm text-center py-10">No chart data available for the last 7 days</p>
-              )}
-            </CardContent>
-          </Card>
-
           {/* AI Insights */}
           <Card className="border border-white/10 bg-slate-950">
             <CardHeader>
