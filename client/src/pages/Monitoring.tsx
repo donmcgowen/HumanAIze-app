@@ -4,8 +4,7 @@ import { StepCounter } from "@/components/StepCounter";
 import { WeightTracker } from "@/components/WeightTracker";
 import { CGMSection } from "@/components/CGMSection";
 import { BodyMeasurementSection } from "@/components/BodyMeasurementSection";
-import { ManualGlucoseSection } from "@/components/ManualGlucoseSection";
-import { Loader2, Footprints, Weight, Activity, Droplets, Clock } from "lucide-react";
+import { Loader2, Footprints, Weight, Activity, Clock } from "lucide-react";
 import { useCallback, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
@@ -113,11 +112,6 @@ export function Monitoring() {
             Steps
           </h2>
           <StepCounter onTotalChange={handleStepUpdate} />
-        </div>
-
-        {/* Manual Glucose Entry Section */}
-        <div className="mb-6">
-          <ManualGlucoseSection />
         </div>
 
         {/* Dexcom Clarity Summary Cards */}
