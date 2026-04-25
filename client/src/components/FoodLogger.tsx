@@ -511,7 +511,6 @@ export function FoodLogger() {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [inlineEditingId, setInlineEditingId] = useState<number | null>(null);
-  const [showAISuggestions, setShowAISuggestions] = useState(false);
   const [editValues, setEditValues] = useState<Record<number, any>>({});
   const [showAddFoodModal, setShowAddFoodModal] = useState(false);
   const [activeMealType, setActiveMealType] = useState<MealType>("breakfast");
@@ -527,7 +526,7 @@ export function FoodLogger() {
 
   const { data: aiSuggestions, isLoading: aiLoading, refetch: refetchAI } = trpc.food.getAIMealSuggestions.useQuery(
     { startOfDay: dayStart, endOfDay: dayEnd },
-    { enabled: showAISuggestions, staleTime: 0, retry: 1, refetchOnWindowFocus: false }
+    { staleTime: 0, retry: 1, refetchOnWindowFocus: false }
   );
 
   const toPositiveNumberOrNull = (value: unknown): number | null => {
@@ -754,40 +753,35 @@ export function FoodLogger() {
         <BudgetBar logged={dailyTotals.calories} goal={targetCalories} exercise={0} />
       </div>
 
-      {/* ── AI Meal Suggestions ── */}
+      {/* ── HumanAIze Meal Suggestions ── */}
       <div className="rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-white/10 overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <div className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-purple-400" />
-            <span className="font-bold text-purple-300 tracking-widest text-sm">AI MEAL SUGGESTIONS</span>
+            <span className="font-bold text-purple-300 tracking-widest text-sm">HumanAIze MEAL SUGGESTIONS</span>
           </div>
           <button
-            onClick={() => { if (!showAISuggestions) { setShowAISuggestions(true); } else { refetchAI(); } }}
+            onClick={() => refetchAI()}
             disabled={aiLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 hover:text-purple-200 text-xs font-semibold transition-colors disabled:opacity-50"
           >
-            {aiLoading ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking...</>)
-              : showAISuggestions && aiSuggestions ? (<><RefreshCw className="h-3.5 w-3.5" /> Refresh</>)
-              : (<><Sparkles className="h-3.5 w-3.5" /> Get Suggestions</>)}
+            {aiLoading
+              ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Thinking...</>)
+              : (<><RefreshCw className="h-3.5 w-3.5" /> Refresh</>)}
           </button>
         </div>
-        {!showAISuggestions && (
-          <div className="px-4 py-5 text-center">
-            <p className="text-slate-400 text-sm">Get personalized meal suggestions based on your remaining macros, glucose levels, weight progress, and health goals.</p>
-          </div>
-        )}
-        {showAISuggestions && aiLoading && (
+        {aiLoading && (
           <div className="px-4 py-8 flex flex-col items-center gap-3">
             <Loader2 className="h-8 w-8 animate-spin text-purple-400" />
             <p className="text-slate-400 text-sm">Analyzing your nutrition data and goals...</p>
           </div>
         )}
-        {showAISuggestions && !aiLoading && aiSuggestions && aiSuggestions.length === 0 && (
+        {!aiLoading && aiSuggestions && aiSuggestions.length === 0 && (
           <div className="px-4 py-5 text-center">
-            <p className="text-slate-400 text-sm">No suggestions available. Try logging some foods first or check your profile targets.</p>
+            <p className="text-slate-400 text-sm">No suggestions available. Check your profile targets.</p>
           </div>
         )}
-        {showAISuggestions && !aiLoading && aiSuggestions && aiSuggestions.length > 0 && (
+        {!aiLoading && aiSuggestions && aiSuggestions.length > 0 && (
           <div className="divide-y divide-white/5">
             {(aiSuggestions as any[]).map((s: any, i: number) => (
               <div key={i} className="px-4 py-4">

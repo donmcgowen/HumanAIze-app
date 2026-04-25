@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Upload, FileText, FileUp, Loader2, AlertCircle, CheckCircle, Activity, Brain, Plus, Trash2, Droplets } from "lucide-react";
+import { Upload, FileText, FileUp, Loader2, Activity, Plus, Trash2, Droplets } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import * as pdfjsLib from "pdfjs-dist";
@@ -30,9 +30,7 @@ export function CGMSection() {
   const utils = trpc.useUtils();
   const dayStart = todayStart();
 
-  const { data: stats, isLoading: statsLoading } = trpc.cgm.getStats.useQuery({ days: 30 });
-  const { data: insights, isLoading: insightsLoading } = trpc.cgm.getInsights.useQuery();
-  const { data: entries, isLoading: entriesLoading } = trpc.manualGlucose.getTodayEntries.useQuery({ dayStart });
+const { data: entries, isLoading: entriesLoading } = trpc.manualGlucose.getTodayEntries.useQuery({ dayStart });
 
   // --- File import state ---
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -159,14 +157,6 @@ export function CGMSection() {
     ts.setHours(hours, minutes, 0, 0);
     addMutation.mutate({ mgdl: value, readingAt: ts.getTime(), notes: notes || undefined });
   };
-
-  const insightColors: Record<string, string> = {
-    success: "bg-green-900/20 border-green-500/30 text-green-400",
-    warning: "bg-yellow-900/20 border-yellow-500/30 text-yellow-400",
-    info: "bg-blue-900/20 border-blue-500/30 text-blue-400",
-  };
-
-  const noData = !statsLoading && !stats;
 
   return (
     <div className="space-y-6">
@@ -340,51 +330,6 @@ export function CGMSection() {
         </CardContent>
       </Card>
 
-      {/* Metrics / AI Insights */}
-      {statsLoading ? (
-        <div className="flex items-center justify-center h-24">
-          <Loader2 className="h-5 w-5 animate-spin text-cyan-400 mr-2" />
-          <span className="text-slate-400 text-sm">Loading glucose data...</span>
-        </div>
-      ) : noData ? (
-        <Card className="border border-white/10 bg-slate-950">
-          <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-            <Activity className="h-12 w-12 text-slate-600 mb-3" />
-            <p className="text-slate-400 mb-1">No CGM data yet</p>
-            <p className="text-slate-500 text-sm">Import a Dexcom Clarity CSV or PDF to see your metrics</p>
-          </CardContent>
-        </Card>
-      ) : stats ? (
-        <Card className="border border-white/10 bg-slate-950">
-          <CardHeader>
-            <CardTitle className="text-white flex items-center gap-2">
-              <Brain className="h-5 w-5 text-purple-400" />
-              AI Health Insights
-            </CardTitle>
-            <CardDescription>Personalized recommendations based on your glucose, food logs, and goals</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {insightsLoading ? (
-              <div className="flex items-center gap-2 py-6 justify-center">
-                <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
-                <span className="text-slate-400 text-sm">Generating AI insights...</span>
-              </div>
-            ) : insights && insights.length > 0 ? (
-              insights.map((insight, i) => (
-                <div key={i} className={`p-4 rounded-lg border ${insightColors[insight.type] || insightColors.info}`}>
-                  <p className="font-semibold text-sm mb-1">{insight.title}</p>
-                  <p className="text-xs opacity-90">{insight.message}</p>
-                </div>
-              ))
-            ) : (
-              <div className="flex items-center gap-2 p-3 text-slate-500 text-sm">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                AI insights unavailable — add food logs and glucose data to unlock recommendations.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }

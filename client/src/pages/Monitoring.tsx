@@ -1,10 +1,10 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { InsightsPanel } from "@/components/InsightsPanel";
+import { RecommendationsSection } from "@/components/RecommendationsSection";
 import { StepCounter } from "@/components/StepCounter";
 import { WeightTracker } from "@/components/WeightTracker";
 import { CGMSection } from "@/components/CGMSection";
 import { BodyMeasurementSection } from "@/components/BodyMeasurementSection";
-import { Loader2, Footprints, Weight, Activity, Clock } from "lucide-react";
+import { Loader2, Footprints, Weight, Activity } from "lucide-react";
 import { useCallback, useState } from "react";
 import { trpc } from "@/lib/trpc";
 
@@ -24,65 +24,6 @@ export function Monitoring() {
   }
 
   // Generate rule-based insights from steps and glucose data
-  const generateInsights = () => {
-    const insights = [];
-
-    // Steps Insights
-    const dailyGoal = 10000;
-    if (liveSteps >= dailyGoal) {
-      insights.push({
-        type: "success" as const,
-        title: "Daily Step Goal Achieved!",
-        description: `Great job! You've completed ${liveSteps.toLocaleString()} steps today, exceeding your goal of ${dailyGoal.toLocaleString()}.`,
-        action: "Keep up this activity level to support your weight loss goals.",
-      });
-    } else if (liveSteps >= dailyGoal * 0.75) {
-      const stepsPercentage = Math.round((liveSteps / dailyGoal) * 100);
-      insights.push({
-        type: "tip" as const,
-        title: "Almost There on Steps",
-        description: `You're at ${stepsPercentage}% of your daily goal with ${liveSteps.toLocaleString()} steps. Just ${(dailyGoal - liveSteps).toLocaleString()} more to go!`,
-        action: "Take a short walk to finish strong today.",
-      });
-    } else if (liveSteps > 0) {
-      insights.push({
-        type: "tip" as const,
-        title: "Increase Daily Activity",
-        description: `You've logged ${liveSteps.toLocaleString()} steps today. Aim for ${dailyGoal.toLocaleString()} steps daily to support your weight loss and improve cardiovascular health.`,
-        action: "Try taking short walks throughout the day to boost your step count.",
-      });
-    } else {
-      insights.push({
-        type: "tip" as const,
-        title: "Start Moving Today",
-        description: "No steps logged yet. Daily activity is crucial for weight loss and overall health. Aim for 10,000 steps today.",
-        action: "Take a walk or engage in light activity to get started.",
-      });
-    }
-
-    // Glucose Insights (rule-based)
-    const avgGlucose = dashboard?.summary?.glucoseAverage;
-    if (avgGlucose) {
-      if (avgGlucose > 180) {
-        insights.push({
-          type: "warning" as const,
-          title: "Elevated Average Glucose",
-          description: `Your 14-day average glucose is ${avgGlucose.toFixed(0)} mg/dL, above the target range of 80–180 mg/dL.`,
-          action: "Review recent meals for high-carb items and log glucose after meals to identify patterns.",
-        });
-      } else if (avgGlucose >= 80 && avgGlucose <= 140) {
-        insights.push({
-          type: "success" as const,
-          title: "Glucose in Healthy Range",
-          description: `Your 14-day average glucose is ${avgGlucose.toFixed(0)} mg/dL — within the healthy target range.`,
-          action: "Keep logging meals and glucose to maintain this trend.",
-        });
-      }
-    }
-
-    return insights;
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6">
       <div className="max-w-4xl mx-auto">
@@ -152,8 +93,10 @@ export function Monitoring() {
           <CGMSection />
         </div>
 
-        {/* Insights Section */}
-        <InsightsPanel insights={generateInsights()} />
+        {/* AI Recommendations */}
+        <div className="mb-6">
+          <RecommendationsSection />
+        </div>
 
         {/* Health Metrics Summary */}
         <Card className="border border-white/10 bg-slate-950 mt-6">
