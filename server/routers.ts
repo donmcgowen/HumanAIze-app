@@ -1896,32 +1896,45 @@ Respond ONLY with a JSON array, no markdown:
           throw new Error('Database connection not available');
         }
         
-        // Read the migration SQL file
-        const migrationPath = path.join(process.cwd(), 'drizzle', 'migrations', '0002_create_all_tables.sql');
-        const sql = fs.readFileSync(migrationPath, 'utf-8');
-        
-        // Split SQL by semicolon and execute each statement
-        const statements = sql.split(';').filter((s: string) => s.trim());
+        const migrationFiles = [
+          '0002_create_all_tables.sql',
+          '0003_add_start_weight.sql',
+          '0004_add_body_measurements_grocery.sql',
+        ];
+
         let executedCount = 0;
-        
-        for (const statement of statements) {
-          if (statement.trim()) {
-            try {
-              await database.execute(statement);
-              executedCount++;
-              console.log(`[Migration] Executed statement ${executedCount}/${statements.length}`);
-            } catch (error: any) {
-              // Table already exists - continue
-              if (error.code === 'ER_TABLE_EXISTS_ERROR' || error.message?.includes('already exists')) {
-                console.log(`[Migration] Table already exists, skipping`);
+
+        for (const fileName of migrationFiles) {
+          const migrationPath = path.join(process.cwd(), 'drizzle', 'migrations', fileName);
+          if (!fs.existsSync(migrationPath)) {
+            console.log(`[Migration] Skipping ${fileName} (not found)`);
+            continue;
+          }
+          const sql = fs.readFileSync(migrationPath, 'utf-8');
+          const statements = sql.split(';').filter((s: string) => s.trim());
+
+          for (const statement of statements) {
+            if (statement.trim()) {
+              try {
+                await database.execute(statement);
                 executedCount++;
-              } else {
-                throw error;
+                console.log(`[Migration] ${fileName}: executed statement ${executedCount}`);
+              } catch (error: any) {
+                if (
+                  error.code === 'ER_TABLE_EXISTS_ERROR' ||
+                  error.message?.includes('already exists') ||
+                  error.message?.includes('Duplicate column')
+                ) {
+                  console.log(`[Migration] ${fileName}: skipped (already applied)`);
+                  executedCount++;
+                } else {
+                  throw error;
+                }
               }
             }
           }
         }
-        
+
         return {
           success: true,
           message: `Migration completed: ${executedCount} statements executed`,

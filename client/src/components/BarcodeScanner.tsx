@@ -4,14 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { X, Loader2, ScanLine } from "lucide-react";
 import { toast } from "sonner";
 
-// Extend Window type for BarcodeDetector
-declare global {
-  interface Window {
-    BarcodeDetector?: new (options?: { formats: string[] }) => {
-      detect(source: HTMLVideoElement | HTMLCanvasElement | ImageBitmap): Promise<Array<{ rawValue: string; format: string }>>;
-    };
-  }
-}
 
 interface BarcodeScannerProps {
   onBarcodeScanned: (barcode: string) => void;

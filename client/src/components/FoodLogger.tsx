@@ -174,50 +174,26 @@ function InlineServingEditor({ log, onSave, onCancel }: InlineServingEditorProps
   });
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Calculate macros via tRPC
-  const { data: calcData, isLoading: calcLoading } = trpc.food.calculateServingMacros.useQuery(
-    {
-      foodName: log.foodName,
-      servingAmount: parseFloat(amount) || 1,
-      servingUnit: unit as any,
-      originalServingSize: log.servingSize || "1 serving",
-      originalCalories: log.calories,
-      originalProtein: log.proteinGrams,
-      originalCarbs: log.carbsGrams,
-      originalFat: log.fatGrams,
-    },
-    {
-      enabled: !!(amount && parseFloat(amount) > 0),
-      staleTime: 2000,
-    }
-  );
+  const originalAmount = parseFloat((log.servingSize || "1").match(/^([\d.]+)/)?.[1] || "1") || 1;
 
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
 
-  const handleSave = () => {
-    const newAmount = parseFloat(amount) || 1;
-    const newServingSize = `${newAmount} ${unit}`;
-    if (calcData) {
-      onSave(log.id, newServingSize, calcData.calories, calcData.proteinGrams, calcData.carbsGrams, calcData.fatGrams);
-    } else {
-      // Fallback: scale proportionally
-      const originalAmount = parseFloat((log.servingSize || "1").match(/^([\d.]+)/)?.[1] || "1") || 1;
-      const ratio = newAmount / originalAmount;
-      onSave(
-        log.id,
-        newServingSize,
-        Math.round(log.calories * ratio),
-        Math.round(log.proteinGrams * ratio * 10) / 10,
-        Math.round(log.carbsGrams * ratio * 10) / 10,
-        Math.round(log.fatGrams * ratio * 10) / 10,
-      );
-    }
+  const newAmount = parseFloat(amount) || 1;
+  const ratio = originalAmount > 0 ? newAmount / originalAmount : 1;
+  const preview = {
+    calories: Math.round(log.calories * ratio),
+    protein: Math.round(log.proteinGrams * ratio * 10) / 10,
+    carbs: Math.round(log.carbsGrams * ratio * 10) / 10,
+    fat: Math.round(log.fatGrams * ratio * 10) / 10,
   };
 
-  const preview = calcData || null;
+  const handleSave = () => {
+    const newServingSize = `${newAmount} ${unit}`;
+    onSave(log.id, newServingSize, preview.calories, preview.protein, preview.carbs, preview.fat);
+  };
 
   return (
     <div className="mt-1 p-2 bg-slate-700/60 rounded-lg border border-cyan-500/30 space-y-2">
@@ -242,24 +218,21 @@ function InlineServingEditor({ log, onSave, onCancel }: InlineServingEditorProps
         />
         <button
           onClick={handleSave}
-          disabled={calcLoading}
-          className="bg-cyan-600 hover:bg-cyan-700 text-white rounded px-2 py-1 text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
+          className="bg-cyan-600 hover:bg-cyan-700 text-white rounded px-2 py-1 text-xs font-semibold flex items-center gap-1"
         >
-          {calcLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+          <Check className="h-3 w-3" />
         </button>
         <button onClick={onCancel} className="text-slate-400 hover:text-white rounded px-1 py-1">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
       {/* Live macro preview */}
-      {preview && (
-        <div className="flex gap-3 text-xs">
-          <span className="text-green-400 font-medium">{Math.round(preview.calories)} cal</span>
-          <span className="text-orange-400">{Math.round(preview.proteinGrams)}g P</span>
-          <span className="text-slate-400">{Math.round(preview.carbsGrams)}g C</span>
-          <span className="text-slate-400">{Math.round(preview.fatGrams)}g F</span>
-        </div>
-      )}
+      <div className="flex gap-3 text-xs">
+        <span className="text-green-400 font-medium">{preview.calories} cal</span>
+        <span className="text-orange-400">{preview.protein}g P</span>
+        <span className="text-slate-400">{preview.carbs}g C</span>
+        <span className="text-slate-400">{preview.fat}g F</span>
+      </div>
     </div>
   );
 }
