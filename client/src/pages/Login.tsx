@@ -25,7 +25,7 @@ export default function Login() {
 
     try {
       await loginMutation.mutateAsync({ username: email, password });
-      navigate("/");
+      navigate("/dashboard");
     } catch (err: any) {
       setError(err.message || "Login failed");
     }
@@ -109,6 +109,13 @@ export default function Login() {
             >
               Sign in with Microsoft
             </Button>
+            <a
+              href="/downloads/humanaize-android-latest.apk"
+              download
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-cyan-500/40 px-4 py-2 text-sm font-semibold text-cyan-400 transition-colors hover:border-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-300"
+            >
+              Download Android APK
+            </a>
           </CardContent>
         </Card>
       </div>
