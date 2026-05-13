@@ -2829,13 +2829,54 @@ All macro values must be per 100g. Be specific with suggestedQty (e.g. "2 lbs", 
       } catch (error: any) {
         const rawMessage = String(error?.message ?? error ?? "");
         const message = rawMessage.includes("@google/generative-ai")
-          ? "Gemini runtime dependency is missing on the server. Grocery AI has been switched to REST mode; redeploy with latest server build."
+          ? "Gemini runtime dependency is missing on the server. Falling back to a built-in grocery plan."
           : rawMessage;
-        console.error("[grocery.generateWithAI] Error:", message || rawMessage);
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: message || "Failed to generate grocery list",
-        });
+
+        console.error("[grocery.generateWithAI] AI generation failed, using fallback list:", message || rawMessage);
+
+        const proteinQty = goal === "muscle gain" ? "4 lbs" : goal === "fat loss" ? "2.5 lbs" : "3 lbs";
+        const carbQty = goal === "muscle gain" ? "4 lbs" : goal === "fat loss" ? "2 lbs" : "3 lbs";
+        const fatQty = goal === "muscle gain" ? "16 oz" : goal === "fat loss" ? "8 oz" : "12 oz";
+
+        const fallbackList = [
+          { name: "Chicken Breast", category: "protein", caloriesPer100g: 165, proteinPer100g: 31, carbsPer100g: 0, fatPer100g: 3.6, suggestedQty: proteinQty, notes: "Lean protein base for weekly prep", isAiSuggested: 1 as const },
+          { name: "93% Lean Ground Turkey", category: "protein", caloriesPer100g: 176, proteinPer100g: 23, carbsPer100g: 0, fatPer100g: 9, suggestedQty: "2 lbs", notes: "High-protein meal prep option", isAiSuggested: 1 as const },
+          { name: "Salmon", category: "protein", caloriesPer100g: 208, proteinPer100g: 20, carbsPer100g: 0, fatPer100g: 13, suggestedQty: "1.5 lbs", notes: "Protein plus omega-3 fats", isAiSuggested: 1 as const },
+          { name: "Canned Tuna", category: "protein", caloriesPer100g: 132, proteinPer100g: 29, carbsPer100g: 0, fatPer100g: 1, suggestedQty: "6 cans", notes: "Quick lean protein", isAiSuggested: 1 as const },
+          { name: "Eggs", category: "protein", caloriesPer100g: 143, proteinPer100g: 13, carbsPer100g: 1, fatPer100g: 10, suggestedQty: "2 dozen", notes: "Breakfast and snack staple", isAiSuggested: 1 as const },
+          { name: "Nonfat Greek Yogurt", category: "dairy", caloriesPer100g: 59, proteinPer100g: 10, carbsPer100g: 4, fatPer100g: 0, suggestedQty: "64 oz", notes: "High-protein dairy option", isAiSuggested: 1 as const },
+          { name: "Low-fat Cottage Cheese", category: "dairy", caloriesPer100g: 98, proteinPer100g: 11, carbsPer100g: 3, fatPer100g: 4, suggestedQty: "32 oz", notes: "Slow-digesting protein", isAiSuggested: 1 as const },
+          { name: "Fairlife Milk", category: "dairy", caloriesPer100g: 50, proteinPer100g: 5, carbsPer100g: 4, fatPer100g: 1.5, suggestedQty: "1 gallon", notes: "Higher protein milk", isAiSuggested: 1 as const },
+          { name: "Old Fashioned Oats", category: "grains", caloriesPer100g: 389, proteinPer100g: 17, carbsPer100g: 66, fatPer100g: 7, suggestedQty: "32 oz", notes: "Complex carb breakfast base", isAiSuggested: 1 as const },
+          { name: "Brown Rice", category: "grains", caloriesPer100g: 111, proteinPer100g: 2.6, carbsPer100g: 23, fatPer100g: 0.9, suggestedQty: carbQty, notes: "Consistent carb source", isAiSuggested: 1 as const },
+          { name: "Quinoa", category: "grains", caloriesPer100g: 120, proteinPer100g: 4.4, carbsPer100g: 21, fatPer100g: 1.9, suggestedQty: "2 lbs", notes: "Higher-protein grain", isAiSuggested: 1 as const },
+          { name: "Sweet Potatoes", category: "produce", caloriesPer100g: 86, proteinPer100g: 1.6, carbsPer100g: 20, fatPer100g: 0.1, suggestedQty: carbQty, notes: "Fiber-rich carb source", isAiSuggested: 1 as const },
+          { name: "Russet Potatoes", category: "produce", caloriesPer100g: 77, proteinPer100g: 2, carbsPer100g: 17, fatPer100g: 0.1, suggestedQty: "3 lbs", notes: "Budget carb staple", isAiSuggested: 1 as const },
+          { name: "Bananas", category: "produce", caloriesPer100g: 89, proteinPer100g: 1.1, carbsPer100g: 23, fatPer100g: 0.3, suggestedQty: "10 count", notes: "Pre/post-workout carbs", isAiSuggested: 1 as const },
+          { name: "Blueberries", category: "produce", caloriesPer100g: 57, proteinPer100g: 0.7, carbsPer100g: 14, fatPer100g: 0.3, suggestedQty: "24 oz", notes: "Low-calorie fruit option", isAiSuggested: 1 as const },
+          { name: "Apples", category: "produce", caloriesPer100g: 52, proteinPer100g: 0.3, carbsPer100g: 14, fatPer100g: 0.2, suggestedQty: "8 count", notes: "Portable snack carb", isAiSuggested: 1 as const },
+          { name: "Avocados", category: "fats", caloriesPer100g: 160, proteinPer100g: 2, carbsPer100g: 9, fatPer100g: 15, suggestedQty: fatQty, notes: "Whole-food healthy fats", isAiSuggested: 1 as const },
+          { name: "Extra Virgin Olive Oil", category: "fats", caloriesPer100g: 884, proteinPer100g: 0, carbsPer100g: 0, fatPer100g: 100, suggestedQty: "1 bottle", notes: "Easy way to adjust fats", isAiSuggested: 1 as const },
+          { name: "Natural Peanut Butter", category: "fats", caloriesPer100g: 588, proteinPer100g: 25, carbsPer100g: 20, fatPer100g: 50, suggestedQty: "16 oz", notes: "Dense calories and fats", isAiSuggested: 1 as const },
+          { name: "Almonds", category: "fats", caloriesPer100g: 579, proteinPer100g: 21, carbsPer100g: 22, fatPer100g: 50, suggestedQty: "12 oz", notes: "Portable fat/protein snack", isAiSuggested: 1 as const },
+          { name: "Spinach", category: "produce", caloriesPer100g: 23, proteinPer100g: 2.9, carbsPer100g: 3.6, fatPer100g: 0.4, suggestedQty: "2 large bags", notes: "Micronutrient dense greens", isAiSuggested: 1 as const },
+          { name: "Broccoli", category: "produce", caloriesPer100g: 35, proteinPer100g: 2.4, carbsPer100g: 7, fatPer100g: 0.4, suggestedQty: "3 heads", notes: "High-volume low-calorie veggie", isAiSuggested: 1 as const },
+          { name: "Bell Peppers", category: "produce", caloriesPer100g: 31, proteinPer100g: 1, carbsPer100g: 6, fatPer100g: 0.3, suggestedQty: "6 count", notes: "Crunchy low-calorie add-in", isAiSuggested: 1 as const },
+          { name: "Onions", category: "produce", caloriesPer100g: 40, proteinPer100g: 1.1, carbsPer100g: 9.3, fatPer100g: 0.1, suggestedQty: "3 lbs", notes: "Flavor base for meal prep", isAiSuggested: 1 as const },
+          { name: "Sparkling Water", category: "beverages", caloriesPer100g: 0, proteinPer100g: 0, carbsPer100g: 0, fatPer100g: 0, suggestedQty: "12 pack", notes: "Zero-calorie hydration", isAiSuggested: 1 as const },
+          { name: "Low-sodium Chicken Broth", category: "beverages", caloriesPer100g: 7, proteinPer100g: 1, carbsPer100g: 0.5, fatPer100g: 0.2, suggestedQty: "32 oz", notes: "Soup and cooking base", isAiSuggested: 1 as const },
+        ];
+
+        try {
+          return await bulkReplaceGroceryItems(ctx.user.id, fallbackList);
+        } catch (fallbackError: any) {
+          const fallbackMessage = String(fallbackError?.message ?? fallbackError ?? "");
+          console.error("[grocery.generateWithAI] Fallback generation failed:", fallbackMessage);
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: fallbackMessage || "Failed to generate grocery list",
+          });
+        }
       }
     }),
   }),

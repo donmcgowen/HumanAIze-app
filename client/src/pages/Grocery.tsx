@@ -73,7 +73,17 @@ export function Grocery() {
       utils.grocery.getItems.invalidate();
       toast.success("Grocery list generated! Tailored to your macro targets.");
     },
-    onError: (e) => toast.error(e.message || "Failed to generate list"),
+    onError: (e) => {
+      const raw = String(e?.message || "");
+      const lower = raw.toLowerCase();
+      const friendly =
+        lower.includes("@google/generative-ai") ||
+        lower.includes("cannot find package") ||
+        lower.includes("imported from")
+          ? "AI grocery service is updating on the server. Please retry in a moment."
+          : raw || "Failed to generate list";
+      toast.error(friendly);
+    },
   });
   const toggleMutation = trpc.grocery.toggleChecked.useMutation({
     onMutate: async ({ id, isChecked }) => {
