@@ -36,13 +36,16 @@ function RouteLoader() {
 }
 
 function Router() {
+  const isAppSubdomain = typeof window !== "undefined" &&
+    (window.location.hostname.startsWith("app.") || window.location.hostname === "localhost");
+
   return (
     <Suspense fallback={<RouteLoader />}>
       <Switch>
         <Route path={"/landing"} component={Landing} />
         <Route path={"/login"} component={Login} />
         <Route path={"/signup"} component={Signup} />
-        <Route path={"/"} component={Landing} />
+        <Route path={"/"} component={isAppSubdomain ? Login : Landing} />
         <Route path={"/app"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
         <Route path={"/android-download"} component={AndroidDownload} />
         <Route path={"/dashboard"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
