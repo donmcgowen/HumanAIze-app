@@ -33,6 +33,13 @@ export type TranscribeOptions = {
   prompt?: string; // Optional: custom prompt for the transcription
 };
 
+export type TranscribeBase64Options = {
+  audioBase64: string;
+  mimeType?: string;
+  language?: string;
+  prompt?: string;
+};
+
 // Native Whisper API segment format
 export type WhisperSegment = {
   id: number;
@@ -123,6 +130,84 @@ export async function transcribeAudio(
       };
     }
 
+    return transcribeAudioBuffer({
+      audioBuffer,
+      mimeType,
+      language: options.language,
+      prompt: options.prompt,
+    });
+
+  } catch (error) {
+    // Handle unexpected errors
+    return {
+      error: "Voice transcription failed",
+      code: "SERVICE_ERROR",
+      details: error instanceof Error ? error.message : "An unexpected error occurred"
+    };
+  }
+}
+
+export async function transcribeAudioBase64(
+  options: TranscribeBase64Options
+): Promise<TranscriptionResponse | TranscriptionError> {
+  try {
+    if (!options.audioBase64 || options.audioBase64.trim().length === 0) {
+      return {
+        error: "No audio data provided",
+        code: "INVALID_FORMAT",
+      };
+    }
+
+    const mimeType = options.mimeType || "audio/m4a";
+    const audioBuffer = Buffer.from(options.audioBase64, "base64");
+    const sizeMB = audioBuffer.length / (1024 * 1024);
+    if (sizeMB > 16) {
+      return {
+        error: "Audio file exceeds maximum size limit",
+        code: "FILE_TOO_LARGE",
+        details: `File size is ${sizeMB.toFixed(2)}MB, maximum allowed is 16MB`
+      };
+    }
+
+    return transcribeAudioBuffer({
+      audioBuffer,
+      mimeType,
+      language: options.language,
+      prompt: options.prompt,
+    });
+  } catch (error) {
+    return {
+      error: "Failed to decode audio data",
+      code: "INVALID_FORMAT",
+      details: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
+async function transcribeAudioBuffer(options: {
+  audioBuffer: Buffer;
+  mimeType: string;
+  language?: string;
+  prompt?: string;
+}): Promise<TranscriptionResponse | TranscriptionError> {
+  try {
+    if (!ENV.forgeApiUrl) {
+      return {
+        error: "Voice transcription service is not configured",
+        code: "SERVICE_ERROR",
+        details: "BUILT_IN_FORGE_API_URL is not set"
+      };
+    }
+    if (!ENV.forgeApiKey) {
+      return {
+        error: "Voice transcription service authentication is missing",
+        code: "SERVICE_ERROR",
+        details: "BUILT_IN_FORGE_API_KEY is not set"
+      };
+    }
+
+    const { audioBuffer, mimeType, language, prompt } = options;
+
     // Step 3: Create FormData for multipart upload to Whisper API
     const formData = new FormData();
     
@@ -135,12 +220,12 @@ export async function transcribeAudio(
     formData.append("response_format", "verbose_json");
     
     // Add prompt - use custom prompt if provided, otherwise generate based on language
-    const prompt = options.prompt || (
-      options.language 
-        ? `Transcribe the user's voice to text, the user's working language is ${getLanguageName(options.language)}`
+    const promptText = prompt || (
+      language
+        ? `Transcribe the user's voice to text, the user's working language is ${getLanguageName(language)}`
         : "Transcribe the user's voice to text"
     );
-    formData.append("prompt", prompt);
+    formData.append("prompt", promptText);
 
     // Step 4: Call the transcription service
     const baseUrl = ENV.forgeApiUrl.endsWith("/")
@@ -182,10 +267,8 @@ export async function transcribeAudio(
       };
     }
 
-    return whisperResponse; // Return native Whisper API response directly
-
+    return whisperResponse;
   } catch (error) {
-    // Handle unexpected errors
     return {
       error: "Voice transcription failed",
       code: "SERVICE_ERROR",

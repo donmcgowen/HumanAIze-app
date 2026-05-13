@@ -10,7 +10,7 @@
  * routers.ts and auth.ts can import from this file without changes.
  */
 
-import { and, eq, gte, lte, lt, desc, sql, or } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, lt, desc, sql, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
 import { neon } from "@neondatabase/serverless";
 import { ENV } from "./_core/env";
@@ -830,6 +830,53 @@ export async function getGlucoseReadingsForDateRange(userId: number, startTime: 
   }));
 }
 
+export async function getClarityGlucoseReadingsForDateRange(
+  userId: number,
+  startTime: number,
+  endTime: number
+): Promise<GlucoseReading[]> {
+  const db = getDb();
+  if (!db) return [];
+
+  const claritySources = await db
+    .select({ id: healthSources.id })
+    .from(healthSources)
+    .where(
+      and(
+        eq(healthSources.userId, userId),
+        eq(healthSources.displayName as any, "Dexcom Clarity")
+      )
+    );
+
+  const sourceIds = claritySources.map((s) => s.id).filter((id) => Number.isFinite(id));
+  if (sourceIds.length === 0) return [];
+
+  const rows = await db
+    .select()
+    .from(glucoseReadings)
+    .where(
+      and(
+        eq(glucoseReadings.userId, userId),
+        inArray((glucoseReadings as any).sourceId, sourceIds as number[]),
+        gte(glucoseReadings.readingAt as any, startTime),
+        lte(glucoseReadings.readingAt as any, endTime)
+      )
+    )
+    .orderBy(desc(glucoseReadings.readingAt as any));
+
+  return rows.map((r) => ({
+    id: r.id,
+    userId: r.userId,
+    sourceId: (r as any).sourceId ?? null,
+    readingAt: Number((r as any).readingAt ?? (r as any).recordedAt ?? 0),
+    mgdl: (r as any).mgdl ?? (r as any).glucoseMgDl ?? 0,
+    trend: (r as any).trend ?? null,
+    mealContext: (r as any).mealContext ?? null,
+    notes: r.notes ?? null,
+    createdAt: r.createdAt,
+  }));
+}
+
 export async function calculateGlucoseStatistics(readings: GlucoseReading[]) {
   if (readings.length === 0) {
     return { count: 0, average: 0, min: 0, max: 0, stdDev: 0, timeInRange: 0, timeAboveRange: 0, timeBelowRange: 0, a1cEstimate: 0, timeRange: { start: null, end: null } };
@@ -869,13 +916,14 @@ async function ensureManualGlucoseSource(userId: number): Promise<number> {
   return getOrCreateGlucoseSource(userId, MANUAL_GLUCOSE_SOURCE_NAME);
 }
 
-export async function addManualGlucoseEntry(userId: number, mgdl: number, readingAt: number, notes?: string): Promise<void> {
+export async function addManualGlucoseEntry(userId: number, mgdl: number, readingAt: number, notes?: string, mealContext?: string): Promise<void> {
   const db = getDb();
   if (!db) throw new Error("Database not available");
   const sourceId = await ensureManualGlucoseSource(userId);
   await db.insert(glucoseReadings).values({
     userId, sourceId, readingAt, mgdl, notes: notes ?? null,
     glucoseMgDl: mgdl, readingType: "manual", recordedAt: readingAt,
+    mealContext: mealContext ?? null,
   } as any);
 }
 
@@ -913,17 +961,68 @@ export async function deleteManualGlucoseEntry(id: number, userId: number): Prom
 export async function getCGMStats(userId: number, days: number = 30) {
   const db = getDb();
   if (!db) return null;
-  const since = Date.now() - days * 24 * 60 * 60 * 1000;
-  const rows = await db.select().from(glucoseReadings)
-    .where(and(eq(glucoseReadings.userId, userId), gte((glucoseReadings as any).readingAt, since)))
-    .orderBy(desc((glucoseReadings as any).readingAt));
-  if (rows.length === 0) return null;
+  const includeAll = days <= 0;
+  const since = Date.now() - Math.max(days, 1) * 24 * 60 * 60 * 1000;
+
+  const rows = includeAll
+    ? await db.select().from(glucoseReadings)
+        .where(eq(glucoseReadings.userId, userId))
+        .orderBy(desc((glucoseReadings as any).readingAt))
+    : await db.select().from(glucoseReadings)
+        .where(and(eq(glucoseReadings.userId, userId), gte((glucoseReadings as any).readingAt, since)))
+        .orderBy(desc((glucoseReadings as any).readingAt));
+
+  if (rows.length === 0) {
+    // PDF imports can update profile-level CGM metrics even when no row-level readings are available.
+    const profileRows = await db
+      .select({
+        avg: userProfiles.cgmAverageGlucose,
+        tir: userProfiles.cgmTimeInRange,
+        a1c: userProfiles.cgmA1cEstimate,
+      })
+      .from(userProfiles)
+      .where(eq(userProfiles.userId, userId))
+      .limit(1);
+
+    const profile = profileRows[0];
+    const hasProfileMetrics =
+      profile &&
+      (profile.avg !== null && profile.avg !== undefined ||
+        profile.tir !== null && profile.tir !== undefined ||
+        profile.a1c !== null && profile.a1c !== undefined);
+
+    if (!hasProfileMetrics) return null;
+
+    return {
+      count: 0,
+      average: Math.round(Number(profile?.avg ?? 0)),
+      min: 0,
+      max: 0,
+      timeInRange: Math.round(Number(profile?.tir ?? 0)),
+      timeAboveRange: 0,
+      timeBelowRange: 0,
+      a1cEstimate: Number(profile?.a1c ?? 0),
+      latestReading: null,
+      latestAt: null,
+      coverageStart: null,
+      coverageEnd: null,
+      coverageDays: 0,
+      dataSource: "clarity_pdf_metrics",
+    };
+  }
+
   const values = rows.map(r => (r as any).mgdl ?? (r as any).glucoseMgDl ?? 0);
   const avg = values.reduce((s, v) => s + v, 0) / values.length;
   const inRange = values.filter(v => v >= 70 && v <= 180).length;
   const above = values.filter(v => v > 180).length;
   const below = values.filter(v => v < 70).length;
   const a1c = Math.round(((avg / 28.7) + 2.15) * 100) / 100;
+  const latestAt = Number((rows[0] as any)?.readingAt ?? 0) || null;
+  const earliestAt = Number((rows[rows.length - 1] as any)?.readingAt ?? 0) || null;
+  const coverageDays = latestAt && earliestAt
+    ? Math.max(1, Math.ceil((latestAt - earliestAt) / (24 * 60 * 60 * 1000)))
+    : 0;
+
   return {
     count: rows.length,
     average: Math.round(avg),
@@ -934,7 +1033,11 @@ export async function getCGMStats(userId: number, days: number = 30) {
     timeBelowRange: Math.round((below / values.length) * 100),
     a1cEstimate: Math.max(4, Math.min(12, a1c)),
     latestReading: (rows[0] as any)?.mgdl ?? null,
-    latestAt: (rows[0] as any)?.readingAt ?? null,
+    latestAt,
+    coverageStart: earliestAt,
+    coverageEnd: latestAt,
+    coverageDays,
+    dataSource: includeAll ? "all_glucose_readings" : "windowed_glucose_readings",
   };
 }
 
@@ -1096,9 +1199,15 @@ export async function getWeightEntries(userId: number, days: number = 90): Promi
   if (!db) return [];
   const cutoffTime = Date.now() - days * 24 * 60 * 60 * 1000;
   try {
-    return await db.select().from(weightEntries)
+    const rows = await db.select().from(weightEntries)
       .where(and(eq(weightEntries.userId, userId), gte(weightEntries.recordedAt, cutoffTime)))
       .orderBy(desc(weightEntries.recordedAt));
+
+    return rows.map((entry: any) => ({
+      ...entry,
+      recordedAt: Number(entry.recordedAt ?? 0),
+      weightLbs: Number(entry.weightLbs ?? 0),
+    }));
   } catch (err) {
     console.error("[db.pg] getWeightEntries error:", err);
     return [];
