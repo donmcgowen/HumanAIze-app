@@ -7,6 +7,10 @@ const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
 });
 
+const ADMIN_EMAIL_ALLOWLIST = new Set([
+  "donmcgowen@outlook.com",
+]);
+
 export const router = t.router;
 export const publicProcedure = t.procedure;
 
@@ -31,7 +35,11 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    if (!ctx.user || ctx.user.role !== 'admin') {
+    const email = (ctx.user?.email ?? "").trim().toLowerCase();
+    const isAdminByRole = ctx.user?.role === "admin";
+    const isAdminByEmail = ADMIN_EMAIL_ALLOWLIST.has(email);
+
+    if (!ctx.user || (!isAdminByRole && !isAdminByEmail)) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
 

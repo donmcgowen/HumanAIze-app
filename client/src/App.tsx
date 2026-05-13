@@ -23,14 +23,9 @@ const Monitoring = lazy(() => import("./pages/Monitoring").then((m) => ({ defaul
 const Progress = lazy(() => import("./pages/Progress").then((m) => ({ default: m.Progress })));
 const Help = lazy(() => import("./pages/Help").then((m) => ({ default: m.Help })));
 const Grocery = lazy(() => import("./pages/Grocery").then((m) => ({ default: m.Grocery })));
-
-// Detect if visitor is on the root marketing domain (humanaize.life / www.humanaize.life)
-// vs the app subdomain (app.humanaize.life). On the root domain the landing page is shown
-// at / so visitors see the marketing page instead of the app dashboard.
-const isRootMarketingDomain =
-  typeof window !== "undefined" &&
-  (window.location.hostname === "humanaize.life" ||
-    window.location.hostname === "www.humanaize.life");
+const GlucoseMonitor = lazy(() => import("./pages/GlucoseMonitor").then((m) => ({ default: m.GlucoseMonitor })));
+const AndroidDownload = lazy(() => import("./pages/AndroidDownload"));
+const Admin = lazy(() => import("./pages/Admin").then((m) => ({ default: m.Admin })));
 
 function RouteLoader() {
   return (
@@ -47,15 +42,9 @@ function Router() {
         <Route path={"/landing"} component={Landing} />
         <Route path={"/login"} component={Login} />
         <Route path={"/signup"} component={Signup} />
-        {/* Root path: show landing page on humanaize.life, dashboard on app.humanaize.life */}
-        <Route
-          path={"/"}
-          component={
-            isRootMarketingDomain
-              ? Landing
-              : () => <DashboardLayout><Dashboard /></DashboardLayout>
-          }
-        />
+        <Route path={"/"} component={Landing} />
+        <Route path={"/app"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
+        <Route path={"/android-download"} component={AndroidDownload} />
         <Route path={"/dashboard"} component={() => <DashboardLayout><Dashboard /></DashboardLayout>} />
         <Route path={"/history"} component={() => <DashboardLayout><History /></DashboardLayout>} />
         <Route path={"/sources"} component={() => <DashboardLayout><Sources /></DashboardLayout>} />
@@ -69,6 +58,8 @@ function Router() {
         <Route path={"/summaries"} component={() => <DashboardLayout><Summaries /></DashboardLayout>} />
         <Route path={"/help"} component={() => <DashboardLayout><Help /></DashboardLayout>} />
         <Route path={"/grocery"} component={() => <DashboardLayout><Grocery /></DashboardLayout>} />
+        <Route path={"/glucose-monitor"} component={() => <DashboardLayout><GlucoseMonitor /></DashboardLayout>} />
+        <Route path={"/admin"} component={() => <DashboardLayout><Admin /></DashboardLayout>} />
         <Route path={"/404"} component={NotFound} />
         <Route component={NotFound} />
       </Switch>

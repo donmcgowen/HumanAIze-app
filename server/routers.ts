@@ -2,7 +2,7 @@ import { getDb } from "./db.pg";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { TRPCError } from "@trpc/server";
 import {
   connectSource,
@@ -21,18 +21,26 @@ import {
   cleanupDuplicateCustomSources,
   migrateCustomAppToConnectApp,
 } from "./healthEngine";
-import { storeSourceCredentials } from "./credentials";
-import { syncAllSources } from "./dataImport";
-import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource, getGroceryItems, addGroceryItem, bulkReplaceGroceryItems, updateGroceryItemChecked, deleteGroceryItem, clearCheckedGroceryItems } from "./db.pg";
+import { getSourceCredentials, storeSourceCredentials } from "./credentials";
+import { importDexcomGlucose, syncAllSources } from "./dataImport";
+import { getUserProfile, upsertUserProfile, addFoodLog, getFoodLogsForDay, getRecentFoods, getFrequentFoods, autoAddToFavorites, deleteFoodLog, updateFoodLog, addFavoriteFood, getFavoriteFoods, deleteFavoriteFood, createMealTemplate, getMealTemplates, getMealTemplate, updateMealTemplate, deleteMealTemplate, getMacroTrends, getGoalProgress, getCachedFoodSearchResults, cacheFoodSearchResults, addProgressPhoto, getProgressPhotos, deleteProgressPhoto, updateProgressPhoto, addGlucoseReadings, getGlucoseReadingsForDateRange, getClarityGlucoseReadingsForDateRange, calculateGlucoseStatistics, logStepsForDay, getTodaySteps, getStepHistory, addWeightEntry, getWeightEntries, deleteWeightEntry, getWeightProgressData, addWorkoutEntry, getWorkoutEntries, deleteWorkoutEntry, getCGMStats, getCGMDailyAverages, getRecentFoodLogsForInsights, addBodyMeasurement, getBodyMeasurements, deleteBodyMeasurement, getBodyMeasurementTrends, addManualGlucoseEntry, getTodayManualGlucoseEntries, deleteManualGlucoseEntry, getOrCreateGlucoseSource, getGroceryItems, addGroceryItem, bulkReplaceGroceryItems, updateGroceryItemChecked, deleteGroceryItem, clearCheckedGroceryItems } from "./db.pg";
 import { searchUSDAFoods, searchUSDABrandedFoods, searchUSDAFoundationFoods } from "./usda";
 import { getSyncStatus } from "./backgroundSync";
 import { lookupBarcodeProduct, getFoodVariant, getDefaultUnit } from "./barcode";
 import { generateFoodInsights, type DailyMacros } from "./insights";
+import { fetchDexcomShareReadings } from "./dexcomShare";
 import { getMealSuggestions, getMealSuggestionsByCategory } from "@shared/mealSuggestions";
 import { parseClarityCSV, validateClarityCSV, calculateReadingStats, type GlucoseReading } from "./clarityImport";
 import { extractTextFromPDF, parseClarityReportText, parseClarityPDFBuffer, validateClarityPDF } from "./pdfExtraction";
 import { recognizeFoodFromPhoto, recognizeFoodFromVoice, recognizeFoodFromPhotoAndVoice } from "./foodRecognition";
 import { analyzeMealPhotoWithGemini, scanProductLabel } from "./geminiMealScan";
+import { scanProductLabelWithOpenAI } from "./openaiMealScan";
+import { detectImageType } from "./imageDetector";
+import { transcribeAudio, transcribeAudioBase64 } from "./_core/voiceTranscription";
+import { appendFile, mkdir } from "node:fs/promises";
+import path from "node:path";
+import { detectIntentsFromTranscript, extractGlucoseFromTranscript } from "./aiIntakeUtils";
+import { sql } from "drizzle-orm";
 
 import { storagePut } from "./storage";
 import { analyzeMealWithAI, type MealData, type DailyTargets } from "./mealAnalysis";
@@ -74,6 +82,308 @@ function estimateCaloriesWithMet(
   return Math.max(1, Math.round(calories));
 }
 
+async function buildIntakeDrafts(
+  ctx: any,
+  transcript: string,
+  defaultMealType: "breakfast" | "lunch" | "dinner" | "snack"
+) {
+  const intents = detectIntentsFromTranscript(transcript);
+
+  const analysisNotes: string[] = [];
+  const confidence = { overall: 0, food: 0, glucose: 0, workout: 0 };
+  const rationale = { food: "", glucose: "", workout: "" };
+
+  const foodDrafts: Array<{
+    foodName: string;
+    servingSize: string;
+    calories: number;
+    proteinGrams: number;
+    carbsGrams: number;
+    fatGrams: number;
+    mealType: "breakfast" | "lunch" | "dinner" | "snack";
+  }> = [];
+
+  let glucoseDraft: { mgdl: number; readingAt: number; notes?: string } | null = null;
+  let workoutDraft: {
+    exerciseName: string;
+    exerciseType: string;
+    durationMinutes: number;
+    intensity: "light" | "moderate" | "intense";
+    notes?: string;
+  } | null = null;
+
+  if (intents.includes("food")) {
+    const parts = transcript
+      .split(/,|\band\b/i)
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    const candidates = parts.length > 0 ? parts : [transcript];
+    for (const candidate of candidates) {
+      try {
+        const results = await searchFoodWithGemini(candidate);
+        const top = Array.isArray(results) && results.length > 0 ? results[0] : null;
+        if (!top) continue;
+        foodDrafts.push({
+          foodName: top.name,
+          servingSize: "1 serving",
+          calories: Math.max(1, Math.round(top.caloriesPer100g)),
+          proteinGrams: Math.max(0, top.proteinPer100g),
+          carbsGrams: Math.max(0, top.carbsPer100g),
+          fatGrams: Math.max(0, top.fatPer100g),
+          mealType: defaultMealType,
+        });
+      } catch {
+        // Continue with remaining candidates.
+      }
+    }
+    analysisNotes.push(`Food drafts: ${foodDrafts.length}`);
+    confidence.food = foodDrafts.length > 0 ? Math.min(0.92, 0.45 + foodDrafts.length * 0.12) : 0.18;
+    rationale.food = foodDrafts.length > 0
+      ? "Matched transcript fragments against Gemini food search and estimated per-serving macros."
+      : "No strong food matches found from transcript fragments.";
+  }
+
+  if (intents.includes("glucose")) {
+    const mgdl = extractGlucoseFromTranscript(transcript);
+    if (mgdl !== null) {
+      glucoseDraft = { mgdl, readingAt: Date.now(), notes: transcript.slice(0, 180) };
+      analysisNotes.push(`Glucose parsed: ${mgdl} mg/dL`);
+      confidence.glucose = /mg\/?d?l/i.test(transcript) ? 0.95 : 0.84;
+      rationale.glucose = "Detected numeric glucose reading from transcript and validated plausible range.";
+    } else {
+      analysisNotes.push("Glucose not detected");
+      confidence.glucose = 0.12;
+      rationale.glucose = "No valid glucose value (40-500 mg/dL) detected.";
+    }
+  }
+
+  if (intents.includes("workout")) {
+    const profile = await getUserProfile(ctx.user.id);
+    const userWeight = profile?.weightLbs || 170;
+    try {
+      const { invokeLLM } = await import("./_core/llm");
+      const response = await invokeLLM({
+        messages: [
+          { role: "system", content: "Extract workout details from text and estimate calories burned. Return strict JSON only." },
+          { role: "user", content: `User text: "${transcript}". User weight: ${userWeight} lbs.` },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "intake_workout_estimate",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                exerciseName: { type: "string" },
+                exerciseType: { type: "string" },
+                durationMinutes: { type: "number" },
+                intensity: { type: "string", enum: ["light", "moderate", "intense"] },
+                reasoning: { type: "string" },
+              },
+              required: ["exerciseName", "exerciseType", "durationMinutes", "intensity", "reasoning"],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+      const content = response.choices[0]?.message?.content;
+      const contentStr = typeof content === "string" ? content : "";
+      const parsed = JSON.parse(contentStr) as {
+        exerciseName: string; exerciseType: string; durationMinutes: number;
+        intensity: "light" | "moderate" | "intense"; reasoning: string;
+      };
+      workoutDraft = {
+        exerciseName: parsed.exerciseName,
+        exerciseType: parsed.exerciseType,
+        durationMinutes: Math.max(1, Math.round(parsed.durationMinutes)),
+        intensity: parsed.intensity,
+        notes: parsed.reasoning,
+      };
+      analysisNotes.push("Workout estimated with AI");
+      confidence.workout = 0.9;
+      rationale.workout = "Workout details extracted with structured AI schema validation.";
+    } catch {
+      const durationMatch = transcript.match(/(\d{1,3})\s*(min|mins|minute|minutes)/i);
+      const durationMinutes = durationMatch ? Math.max(1, Number(durationMatch[1])) : 30;
+      const normalized = transcript.toLowerCase();
+      let exerciseType = "Cardio";
+      if (/strength|lift|weights|resistance/.test(normalized)) exerciseType = "Strength";
+      if (/yoga|pilates|stretch/.test(normalized)) exerciseType = "Flexibility";
+      if (/basketball|tennis|soccer|sport/.test(normalized)) exerciseType = "Sports";
+      const intensity: "light" | "moderate" | "intense" = /hard|intense|sprint|hiit/.test(normalized)
+        ? "intense" : /easy|light|walk/.test(normalized) ? "light" : "moderate";
+      workoutDraft = {
+        exerciseName: transcript,
+        exerciseType,
+        durationMinutes,
+        intensity,
+        notes: `Estimated from text; calories estimate ${estimateCaloriesWithMet(exerciseType, durationMinutes, userWeight, intensity)} kcal.`,
+      };
+      analysisNotes.push("Workout estimated with fallback");
+      confidence.workout = 0.62;
+      rationale.workout = "Fallback rules inferred workout type, intensity, and duration from transcript patterns.";
+    }
+  }
+
+  const activeConfidences = [confidence.food, confidence.glucose, confidence.workout].filter((c) => c > 0);
+  confidence.overall = activeConfidences.length > 0
+    ? activeConfidences.reduce((sum, c) => sum + c, 0) / activeConfidences.length
+    : 0.2;
+
+  return { intents, foodDrafts, glucoseDraft, workoutDraft, analysisNotes, confidence, rationale };
+}
+
+type DexcomApiRecord = {
+  recordId?: string;
+  value?: number;
+  displayTime?: string;
+  trend?: string;
+};
+
+type NightscoutRecord = {
+  _id?: string;
+  sgv?: number;
+  date?: number;
+  dateString?: string;
+  direction?: string;
+};
+
+type DexcomConnection = {
+  sourceId: number;
+} & (
+  | { mode: "oauth"; accessToken: string }
+  | {
+      mode: "share";
+      shareUsername: string;
+      sharePassword: string;
+      shareRegion: string;
+    }
+  | { mode: "nightscout"; nightscoutUrl: string; apiToken: string }
+);
+
+async function getDexcomSourceAndCredentials(userId: number): Promise<DexcomConnection | null> {
+  const sources = await getSourcesForUser(userId);
+  const dexcomSource = sources.find((s: any) => s.provider === "dexcom");
+  if (!dexcomSource) return null;
+
+  const creds = await getSourceCredentials(userId, dexcomSource.id);
+  const authType = typeof creds?.authType === "string" ? creds.authType : "";
+
+  const shareUsername = typeof creds?.shareUsername === "string" ? creds.shareUsername : "";
+  const sharePassword = typeof creds?.sharePassword === "string" ? creds.sharePassword : "";
+  const shareRegion = typeof creds?.shareRegion === "string" ? creds.shareRegion : "us";
+  if ((authType === "dexcom_share" || shareUsername) && shareUsername && sharePassword) {
+    return {
+      sourceId: dexcomSource.id,
+      mode: "share",
+      shareUsername,
+      sharePassword,
+      shareRegion: shareRegion.trim().toLowerCase() === "eu" ? "eu" : "us",
+    };
+  }
+
+  const nightscoutUrl = typeof creds?.nightscoutUrl === "string" ? creds.nightscoutUrl : "";
+  const apiToken = typeof creds?.apiToken === "string" ? creds.apiToken : "";
+  if (nightscoutUrl && apiToken) {
+    return {
+      sourceId: dexcomSource.id,
+      mode: "nightscout",
+      nightscoutUrl: nightscoutUrl.replace(/\/+$/, ""),
+      apiToken,
+    };
+  }
+
+  const accessToken = typeof creds?.accessToken === "string" ? creds.accessToken : "";
+  if (!accessToken) return null;
+
+  return { sourceId: dexcomSource.id, mode: "oauth", accessToken };
+}
+
+function normalizeNightscoutRecord(record: NightscoutRecord) {
+  const mgdl = Number(record.sgv ?? 0);
+  const readingAt = record.dateString
+    ? new Date(record.dateString).toISOString()
+    : new Date(record.date ?? Date.now()).toISOString();
+  const trend = (record.direction || "Flat").toString();
+
+  return {
+    mgdl,
+    mmol: +(mgdl / 18.0182).toFixed(2),
+    trend,
+    readingAt,
+  };
+}
+
+async function fetchDexcomRecords(conn: DexcomConnection): Promise<Array<ReturnType<typeof normalizeDexcomRecord>>> {
+  if (conn.mode === "share") {
+    const data = await fetchDexcomShareReadings(
+      {
+        shareUsername: conn.shareUsername,
+        sharePassword: conn.sharePassword,
+        shareRegion: conn.shareRegion,
+      },
+      24 * 60,
+      288
+    );
+
+    return data.map((row) => ({
+      mgdl: row.mgdl,
+      mmol: +(row.mgdl / 18.0182).toFixed(2),
+      trend: row.trend,
+      readingAt: row.readingAt,
+    }));
+  }
+
+  if (conn.mode === "nightscout") {
+    const response = await fetch(
+      `${conn.nightscoutUrl}/api/v1/entries.json?count=288&token=${encodeURIComponent(conn.apiToken)}`,
+      {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Nightscout API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = (await response.json()) as NightscoutRecord[];
+    return Array.isArray(data)
+      ? data.map(normalizeNightscoutRecord)
+      : [];
+  }
+
+  const response = await fetch("https://api.dexcom.com/v2/users/self/glucoses", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${conn.accessToken}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Dexcom API error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as { records?: DexcomApiRecord[] };
+  return Array.isArray(data.records) ? data.records.map(normalizeDexcomRecord) : [];
+}
+
+function normalizeDexcomRecord(record: DexcomApiRecord) {
+  const mgdl = Number(record.value ?? 0);
+  const readingAt = record.displayTime ? new Date(record.displayTime).toISOString() : new Date().toISOString();
+  const trend = (record.trend || "steady").toString();
+
+  return {
+    mgdl,
+    mmol: +(mgdl / 18.0182).toFixed(2),
+    trend,
+    readingAt,
+  };
+}
+
 import { z } from "zod";
 
 const aiRouter = router({
@@ -111,6 +421,107 @@ const aiRouter = router({
         input.dailyTargets,
         input.consumedSoFar
       );
+    }),
+  parseIntake: protectedProcedure
+    .input(
+      z.object({
+        transcript: z.string().min(3),
+        defaultMealType: z.enum(["breakfast", "lunch", "dinner", "snack"]).default("snack"),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const transcript = input.transcript.trim();
+      const parsed = await buildIntakeDrafts(ctx, transcript, input.defaultMealType);
+      return { ...parsed, transcription: transcript };
+    }),
+  parseIntakeVoice: protectedProcedure
+    .input(
+      z.object({
+        audioUrl: z.string().url().optional(),
+        audioBase64: z.string().min(1).optional(),
+        mimeType: z.string().optional(),
+        defaultMealType: z.enum(["breakfast", "lunch", "dinner", "snack"]).default("snack"),
+      })
+      .refine((data) => !!data.audioUrl || !!data.audioBase64, {
+        message: "Either audioUrl or audioBase64 is required",
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const transcription = input.audioBase64
+        ? await transcribeAudioBase64({
+            audioBase64: input.audioBase64,
+            mimeType: input.mimeType,
+            language: "en",
+            prompt: "Transcribe health intake details about food, glucose, and workouts",
+          })
+        : await transcribeAudio({
+            audioUrl: input.audioUrl as string,
+            language: "en",
+            prompt: "Transcribe health intake details about food, glucose, and workouts",
+          });
+
+      if ("error" in transcription) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Voice transcription failed: ${transcription.error}`,
+        });
+      }
+
+      const transcript = (transcription.text || "").trim();
+      if (!transcript) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "No speech detected in audio.",
+        });
+      }
+
+      const parsed = await buildIntakeDrafts(ctx, transcript, input.defaultMealType);
+      return { ...parsed, transcription: transcript };
+    }),
+  logIntakeCorrection: protectedProcedure
+    .input(
+      z.object({
+        source: z.enum(["monitoring", "workouts", "food", "other"]),
+        rawTranscript: z.string().optional(),
+        editedTranscript: z.string().optional(),
+        initialDraft: z.any(),
+        finalDraft: z.any(),
+        accepted: z.boolean(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const logDir = path.join(process.cwd(), "logs");
+      const logFile = path.join(logDir, "ai-intake-corrections.jsonl");
+      await mkdir(logDir, { recursive: true });
+      await appendFile(
+        logFile,
+        JSON.stringify({ ts: new Date().toISOString(), userId: ctx.user.id, ...input }) + "\n",
+        "utf8"
+      );
+      return { success: true };
+    }),
+  transcribeVoice: protectedProcedure
+    .input(
+      z.object({
+        audioBase64: z.string().min(1),
+        mimeType: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const result = await transcribeAudioBase64({
+        audioBase64: input.audioBase64,
+        mimeType: input.mimeType,
+        language: "en",
+        prompt: "Transcribe what the user said",
+      });
+      if ("error" in result) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Transcription failed: ${result.error}` });
+      }
+      const transcript = (result.text || "").trim();
+      if (!transcript) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "No speech detected in audio." });
+      }
+      return { transcript };
     }),
 });
 
@@ -304,6 +715,56 @@ export const appRouter = router({
           token: sessionToken,
         };
       }),
+    passkeyRegisterOptions: publicProcedure
+      .input(
+        z.object({
+          username: z.string().optional(),
+          email: z.string().email().optional(),
+        })
+      )
+      .mutation(async () => {
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Passkey registration options are not implemented yet.",
+        });
+      }),
+    passkeyRegisterVerify: publicProcedure
+      .input(
+        z.object({
+          credential: z.any(),
+        })
+      )
+      .mutation(async () => {
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Passkey registration verification is not implemented yet.",
+        });
+      }),
+    passkeyLoginOptions: publicProcedure
+      .input(
+        z.object({
+          username: z.string().optional(),
+          email: z.string().email().optional(),
+        })
+      )
+      .mutation(async () => {
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Passkey login options are not implemented yet.",
+        });
+      }),
+    passkeyLoginVerify: publicProcedure
+      .input(
+        z.object({
+          assertion: z.any(),
+        })
+      )
+      .mutation(async () => {
+        throw new TRPCError({
+          code: "METHOD_NOT_SUPPORTED",
+          message: "Passkey login verification is not implemented yet.",
+        });
+      }),
     signup: publicProcedure
       .input(
         z.object({
@@ -316,7 +777,8 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const { createUser } = await import("./auth");
         const { sdk } = await import("./_core/sdk");
-        const { sendWelcomeEmail } = await import("./emailService");
+        const { sendWelcomeEmail, sendRegistrationTrackingCopies, sendEmailVerificationEmail } = await import("./emailService");
+        const { ENV } = await import("./_core/env");
         
         const result = await createUser(input.username, input.email, input.password, input.name);
         if (!result.success) {
@@ -342,10 +804,97 @@ export const appRouter = router({
           console.error(`[Email] Failed to send welcome email to ${input.email}:`, err)
         );
 
+        // Send email verification link
+        if (result.userId) {
+          const { generateEmailVerificationToken } = await import("./auth");
+          generateEmailVerificationToken(result.userId).then((token) => {
+            if (token) {
+              sendEmailVerificationEmail(input.email, input.name || input.username, token, ENV.appBaseUrl).catch((err) =>
+                console.error(`[Email] Failed to send verification email to ${input.email}:`, err)
+              );
+            }
+          });
+        }
+
+        // Send registration tracking copies to admin inbox — fire-and-forget
+        sendRegistrationTrackingCopies(input.email, input.name || input.username).catch((err) =>
+          console.error(`[Email] Failed to send registration tracking copies for ${input.email}:`, err)
+        );
+
         return {
           success: true,
           message: "Account created successfully",
+          user: (result as any).user,
+          token: sessionToken,
         };
+      }),
+    sendUpgradeOffer: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const { sendUpgradeOfferEmail } = await import("./emailService");
+        const to = ctx.user.email;
+        if (!to) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No email found for this account",
+          });
+        }
+
+        await sendUpgradeOfferEmail(to, ctx.user.name || ctx.user.username || "there");
+        return { success: true, message: "Upgrade offer email sent" };
+      }),
+    // ── Account lifecycle ──────────────────────────────────────────────────
+    deleteAccount: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const { softDeleteUser } = await import("./auth");
+        const userId = Number(ctx.user.id);
+        if (!Number.isFinite(userId)) throw new TRPCError({ code: "UNAUTHORIZED" });
+
+        const result = await softDeleteUser(userId);
+        if (!result.success) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: (result as any).message });
+        }
+
+        // Clear session cookie so the user is logged out immediately
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+        return { success: true };
+      }),
+    adminDeleteUser: adminProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const { hardDeleteUserByEmail } = await import("./auth");
+        const result = await hardDeleteUserByEmail(input.email);
+        if (!result.success) {
+          throw new TRPCError({ code: "NOT_FOUND", message: (result as any).message });
+        }
+        return result;
+      }),
+    verifyEmail: publicProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        const { verifyEmailToken } = await import("./auth");
+        const result = await verifyEmailToken(input.token);
+        if (!result.success) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: result.message });
+        }
+        return { success: true, message: result.message };
+      }),
+    resendVerification: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        const { generateEmailVerificationToken } = await import("./auth");
+        const { sendEmailVerificationEmail } = await import("./emailService");
+        const { ENV } = await import("./_core/env");
+        const userId = Number(ctx.user.id);
+        if (!Number.isFinite(userId)) throw new TRPCError({ code: "UNAUTHORIZED" });
+
+        const email = ctx.user.email;
+        if (!email) throw new TRPCError({ code: "BAD_REQUEST", message: "No email on this account" });
+
+        const token = await generateEmailVerificationToken(userId);
+        if (!token) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Could not generate verification token" });
+
+        await sendEmailVerificationEmail(email, ctx.user.name || ctx.user.username || "there", token, ENV.appBaseUrl);
+        return { success: true };
       }),
   }),
   // Mobile-compatible user profile procedures
@@ -1094,20 +1643,38 @@ Be concise, friendly, and actionable. Format responses with bullet points or sho
           throw error;
         }
       }),
-    // Gemini AI Food Scanner (product label OR meal plate)
+    // Hybrid AI Food Scanner (auto-detects label vs meal, routes to optimal model)
     analyzeMealPhoto: protectedProcedure
       .input(
         z.object({
           imageBase64: z.string().min(1),
           mimeType: z.string().default("image/jpeg"),
-          scanMode: z.enum(["meal", "product"]).default("meal"),
+          scanMode: z.enum(["meal", "product", "auto"]).default("auto"),
         })
       )
       .mutation(async ({ input }) => {
         try {
-          const result = input.scanMode === "product"
-            ? await scanProductLabel(input.imageBase64, input.mimeType)
-            : await analyzeMealPhotoWithGemini(input.imageBase64, input.mimeType);
+          let result;
+
+          if (input.scanMode === "auto") {
+            // Auto-detect image type and route to optimal model
+            const imageType = await detectImageType(input.imageBase64, input.mimeType);
+
+            if (imageType === "label") {
+              // Nutrition label → use GPT-4o-mini for superior OCR
+              result = await scanProductLabelWithOpenAI(input.imageBase64, input.mimeType);
+            } else {
+              // Plated meal → use Gemini 2.5-flash (faster, cheaper)
+              result = await analyzeMealPhotoWithGemini(input.imageBase64, input.mimeType);
+            }
+          } else if (input.scanMode === "product") {
+            // Explicit product label scan → use GPT-4o-mini
+            result = await scanProductLabelWithOpenAI(input.imageBase64, input.mimeType);
+          } else {
+            // Explicit meal scan → use Gemini 2.5-flash
+            result = await analyzeMealPhotoWithGemini(input.imageBase64, input.mimeType);
+          }
+
           return { success: true, ...result };
         } catch (error) {
           throw new TRPCError({
@@ -1865,6 +2432,102 @@ Respond ONLY with a JSON array, no markdown:
     status: protectedProcedure.query(() => getSyncStatus()),
   }),
   admin: router({
+    listUserActivity: adminProcedure
+      .input(
+        z.object({
+          days: z.number().int().min(7).max(90).default(30),
+        })
+      )
+      .query(async ({ input }) => {
+        const db = getDb();
+        if (!db) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database is not configured" });
+        }
+
+        const days = input.days;
+        const result = await db.execute(sql`
+          SELECT
+            u.id,
+            u.email,
+            u.username,
+            u.name,
+            u."createdAt",
+            u."lastSignedIn",
+            COALESCE(fl.food_logs, 0) AS "foodLogsLastWindow",
+            COALESCE(we.workouts, 0) AS "workoutsLastWindow",
+            COALESCE(gr.glucose_readings, 0) AS "glucoseReadingsLastWindow",
+            (
+              COALESCE(fl.food_logs, 0)
+              + COALESCE(we.workouts, 0)
+              + COALESCE(gr.glucose_readings, 0)
+            ) AS "actionsLastWindow",
+            ROUND(
+              (
+                COALESCE(fl.food_logs, 0)
+                + COALESCE(we.workouts, 0)
+                + COALESCE(gr.glucose_readings, 0)
+              )::numeric / GREATEST(${days}, 1),
+              2
+            ) AS "avgActionsPerDay",
+            GREATEST(
+              COALESCE(fl.last_food_at, TO_TIMESTAMP(0)),
+              COALESCE(we.last_workout_at, TO_TIMESTAMP(0)),
+              COALESCE(gr.last_glucose_at, TO_TIMESTAMP(0)),
+              COALESCE(u."lastSignedIn", TO_TIMESTAMP(0))
+            ) AS "lastActivityAt"
+          FROM users u
+          LEFT JOIN (
+            SELECT
+              "userId",
+              COUNT(*)::int AS food_logs,
+              MAX("createdAt") AS last_food_at
+            FROM food_logs
+            WHERE "createdAt" >= NOW() - (${days} * INTERVAL '1 day')
+            GROUP BY "userId"
+          ) fl ON fl."userId" = u.id
+          LEFT JOIN (
+            SELECT
+              "userId",
+              COUNT(*)::int AS workouts,
+              MAX("createdAt") AS last_workout_at
+            FROM workout_entries
+            WHERE "createdAt" >= NOW() - (${days} * INTERVAL '1 day')
+            GROUP BY "userId"
+          ) we ON we."userId" = u.id
+          LEFT JOIN (
+            SELECT
+              "userId",
+              COUNT(*)::int AS glucose_readings,
+              MAX("createdAt") AS last_glucose_at
+            FROM glucose_readings
+            WHERE "createdAt" >= NOW() - (${days} * INTERVAL '1 day')
+            GROUP BY "userId"
+          ) gr ON gr."userId" = u.id
+          WHERE u."deletedAt" IS NULL
+          ORDER BY u."createdAt" DESC
+        `);
+
+        const rows = ((result as any)?.rows ?? result ?? []) as Array<any>;
+        return rows.map((row) => {
+          const actions = Number(row.actionsLastWindow ?? 0);
+          const frequency = actions >= days ? "high" : actions >= Math.ceil(days / 3) ? "medium" : "low";
+          return {
+            id: Number(row.id),
+            email: row.email ?? "",
+            username: row.username ?? null,
+            name: row.name ?? null,
+            createdAt: row.createdAt ?? null,
+            lastSignedIn: row.lastSignedIn ?? null,
+            lastActivityAt: row.lastActivityAt ?? null,
+            foodLogsLastWindow: Number(row.foodLogsLastWindow ?? 0),
+            workoutsLastWindow: Number(row.workoutsLastWindow ?? 0),
+            glucoseReadingsLastWindow: Number(row.glucoseReadingsLastWindow ?? 0),
+            actionsLastWindow: actions,
+            avgActionsPerDay: Number(row.avgActionsPerDay ?? 0),
+            frequency,
+          };
+        });
+      }),
     cleanupDuplicateSources: protectedProcedure.mutation(async ({ ctx }) => {
       // Only allow owner to run cleanup
       if (ctx.user.id !== 1) {
@@ -1965,7 +2628,7 @@ Respond ONLY with a JSON array, no markdown:
     addEntry: protectedProcedure
       .input(
         z.object({
-          weightLbs: z.number().int().positive(),
+          weightLbs: z.number().positive(),
           recordedAt: z.number().int(),
           notes: z.string().optional(),
         })
@@ -2048,13 +2711,15 @@ Respond ONLY with a JSON array, no markdown:
 
     generateWithAI: protectedProcedure.mutation(async ({ ctx }) => {
       const profile = await getUserProfile(ctx.user.id);
-      if (!profile) throw new TRPCError({ code: "BAD_REQUEST", message: "Complete your profile first" });
+      if (!profile) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Complete your profile first" });
+      }
 
-      const { GoogleGenerativeAI } = await import("@google/generative-ai");
-      const genAI = new GoogleGenerativeAI(ENV.geminiApiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-      const goal = profile.fitnessGoal === "lose_fat" ? "fat loss" : profile.fitnessGoal === "build_muscle" ? "muscle gain" : "maintenance";
+      const goal = profile.fitnessGoal === "lose_fat"
+        ? "fat loss"
+        : profile.fitnessGoal === "build_muscle"
+          ? "muscle gain"
+          : "maintenance";
       const cals = profile.dailyCalorieTarget ?? 2000;
       const prot = profile.dailyProteinTarget ?? 150;
       const carbs = profile.dailyCarbsTarget ?? 200;
@@ -2085,31 +2750,93 @@ Return ONLY a JSON array (no markdown) with this exact structure:
 Categories must be one of: protein, dairy, produce, grains, fats, beverages, other.
 All macro values must be per 100g. Be specific with suggestedQty (e.g. "2 lbs", "1 dozen", "32 oz", "1 bag").`;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-      const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-      const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to generate grocery list" });
+      try {
+        const geminiKey =
+          ENV.geminiApiKey ||
+          process.env.GEMINI_API_KEY ||
+          process.env.GOOGLE_API_KEY ||
+          "";
+        if (!geminiKey) {
+          throw new Error("Gemini API key not configured");
+        }
 
-      const items = JSON.parse(jsonMatch[0]) as Array<{
-        name: string; category: string;
-        caloriesPer100g: number; proteinPer100g: number; carbsPer100g: number; fatPer100g: number;
-        suggestedQty?: string; notes?: string;
-      }>;
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.3,
+                maxOutputTokens: 4096,
+                responseMimeType: "application/json",
+              },
+            }),
+          }
+        );
 
-      const groceryList = items.map(item => ({
-        name: item.name,
-        category: item.category || "other",
-        caloriesPer100g: Number(item.caloriesPer100g) || 0,
-        proteinPer100g: Number(item.proteinPer100g) || 0,
-        carbsPer100g: Number(item.carbsPer100g) || 0,
-        fatPer100g: Number(item.fatPer100g) || 0,
-        suggestedQty: item.suggestedQty,
-        notes: item.notes,
-        isAiSuggested: 1 as const,
-      }));
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Gemini API error: ${response.status} ${errText}`);
+        }
 
-      return bulkReplaceGroceryItems(ctx.user.id, groceryList);
+        const data = await response.json() as any;
+        const parts = data?.candidates?.[0]?.content?.parts ?? [];
+        const text = parts.map((p: any) => p.text ?? "").join("").trim();
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          const cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+          const jsonMatch = cleaned.match(/\[[\s\S]*\]/);
+          if (!jsonMatch) {
+            throw new Error("Could not parse Gemini grocery list as JSON");
+          }
+          parsed = JSON.parse(jsonMatch[0]);
+        }
+
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          throw new Error("Gemini returned an empty grocery list");
+        }
+
+        const validCategories = new Set(["protein", "dairy", "produce", "grains", "fats", "beverages", "other"]);
+
+        const groceryList = parsed
+          .filter((item: any) => typeof item?.name === "string" && item.name.trim().length > 0)
+          .map((item: any) => {
+            const categoryRaw = typeof item?.category === "string" ? item.category.toLowerCase().trim() : "other";
+            return {
+              name: item.name.trim(),
+              category: validCategories.has(categoryRaw) ? categoryRaw : "other",
+              caloriesPer100g: Number(item?.caloriesPer100g) || 0,
+              proteinPer100g: Number(item?.proteinPer100g) || 0,
+              carbsPer100g: Number(item?.carbsPer100g) || 0,
+              fatPer100g: Number(item?.fatPer100g) || 0,
+              suggestedQty: typeof item?.suggestedQty === "string" ? item.suggestedQty : null,
+              notes: typeof item?.notes === "string" ? item.notes : null,
+              isAiSuggested: 1 as const,
+            };
+          })
+          .slice(0, 40);
+
+        if (groceryList.length === 0) {
+          throw new Error("Gemini response did not contain valid grocery items");
+        }
+
+        return bulkReplaceGroceryItems(ctx.user.id, groceryList);
+      } catch (error: any) {
+        const rawMessage = String(error?.message ?? error ?? "");
+        const message = rawMessage.includes("@google/generative-ai")
+          ? "Gemini runtime dependency is missing on the server. Grocery AI has been switched to REST mode; redeploy with latest server build."
+          : rawMessage;
+        console.error("[grocery.generateWithAI] Error:", message || rawMessage);
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: message || "Failed to generate grocery list",
+        });
+      }
     }),
   }),
 
@@ -2726,21 +3453,141 @@ Return ONLY valid JSON with no markdown:
   }),
   cgm: router({
     getStats: protectedProcedure
-      .input(z.object({ days: z.number().int().min(7).max(90).default(30) }))
+      .input(z.object({ days: z.number().int().min(0).max(3650).default(0) }))
       .query(({ ctx, input }) => getCGMStats(ctx.user.id, input.days)),
     getDailyAverages: protectedProcedure
       .input(z.object({ days: z.number().int().min(7).max(30).default(7) }))
       .query(({ ctx, input }) => getCGMDailyAverages(ctx.user.id, input.days)),
-    getInsights: protectedProcedure
-      .query(async ({ ctx }) => {
-        const [stats, dailyAvgs, foodLogs, goalProgress] = await Promise.all([
-          getCGMStats(ctx.user.id, 30),
-          getCGMDailyAverages(ctx.user.id, 7),
-          getRecentFoodLogsForInsights(ctx.user.id, 7),
-          getGoalProgress(ctx.user.id),
+    getClarityReport: protectedProcedure
+      .input(z.object({ mode: z.enum(["30", "90_compare"]).default("30") }))
+      .query(async ({ ctx, input }) => {
+        const now = Date.now();
+        const dayMs = 24 * 60 * 60 * 1000;
+        const currentDays = input.mode === "90_compare" ? 90 : 30;
+        const currentStart = now - currentDays * dayMs;
+        const previousStart = currentStart - currentDays * dayMs;
+        const previousEnd = currentStart - 1;
+
+        const [profile, currentReadings, previousReadings] = await Promise.all([
+          getUserProfile(ctx.user.id),
+          getClarityGlucoseReadingsForDateRange(ctx.user.id, currentStart, now),
+          getClarityGlucoseReadingsForDateRange(ctx.user.id, previousStart, previousEnd),
         ]);
 
+        const currentStatsRaw = await calculateGlucoseStatistics(currentReadings);
+        const previousStatsRaw = await calculateGlucoseStatistics(previousReadings);
+
+        const hasCurrentReadings = currentReadings.length > 0;
+        const hasPreviousReadings = previousReadings.length > 0;
+
+        const profileAvg = Number((profile as any)?.cgmAverageGlucose);
+        const profileA1c = Number((profile as any)?.cgmA1cEstimate);
+        const profileTir = Number((profile as any)?.cgmTimeInRange);
+
+        const normalizedCurrent = {
+          ...currentStatsRaw,
+          average:
+            hasCurrentReadings
+              ? currentStatsRaw.average
+              : Number.isFinite(profileAvg) && profileAvg > 0
+                ? Math.round(profileAvg * 10) / 10
+                : null,
+          a1cEstimate:
+            hasCurrentReadings
+              ? currentStatsRaw.a1cEstimate
+              : Number.isFinite(profileA1c) && profileA1c > 0
+                ? Math.round(profileA1c * 100) / 100
+                : null,
+          timeInRange:
+            hasCurrentReadings
+              ? currentStatsRaw.timeInRange
+              : Number.isFinite(profileTir) && profileTir >= 0
+                ? Math.round(profileTir * 10) / 10
+                : null,
+        };
+
+        const normalizedPrevious = hasPreviousReadings
+          ? previousStatsRaw
+          : {
+              ...previousStatsRaw,
+              average: null,
+              a1cEstimate: null,
+              timeInRange: null,
+            };
+
+        const metricDelta = (curr: number | null | undefined, prev: number | null | undefined) => {
+          if (!Number.isFinite(Number(curr)) || !Number.isFinite(Number(prev))) return null;
+          return Math.round((Number(curr) - Number(prev)) * 100) / 100;
+        };
+
+        return {
+          mode: input.mode,
+          current: {
+            days: currentDays,
+            start: currentStart,
+            end: now,
+            readingCount: currentReadings.length,
+            stats: normalizedCurrent,
+            readings: currentReadings,
+          },
+          previous: {
+            days: currentDays,
+            start: previousStart,
+            end: previousEnd,
+            readingCount: previousReadings.length,
+            stats: normalizedPrevious,
+            readings: previousReadings,
+          },
+          comparison:
+            input.mode === "90_compare"
+              ? {
+                  avgDelta: metricDelta(normalizedCurrent.average, normalizedPrevious.average),
+                  a1cDelta: metricDelta(normalizedCurrent.a1cEstimate, normalizedPrevious.a1cEstimate),
+                  tirDelta: metricDelta(normalizedCurrent.timeInRange, normalizedPrevious.timeInRange),
+                }
+              : null,
+        };
+      }),
+    getInsights: protectedProcedure
+      .query(async ({ ctx }) => {
+        const [stats, profile] = await Promise.all([
+          getCGMStats(ctx.user.id, 0),
+          getUserProfile(ctx.user.id),
+        ]);
         if (!stats) return null;
+
+        const profileAvg = Number((profile as any)?.cgmAverageGlucose);
+        const profileA1c = Number((profile as any)?.cgmA1cEstimate);
+        const profileTir = Number((profile as any)?.cgmTimeInRange);
+
+        const hasProfileAvg = Number.isFinite(profileAvg) && profileAvg > 0;
+        const hasProfileA1c = Number.isFinite(profileA1c) && profileA1c > 0;
+        const hasProfileTir = Number.isFinite(profileTir) && profileTir >= 0;
+
+        const effectiveAvg = hasProfileAvg ? profileAvg : Number((stats as any).average ?? 0);
+        const effectiveA1c = hasProfileA1c ? profileA1c : Number((stats as any).a1cEstimate ?? 0);
+        const effectiveTir = hasProfileTir ? profileTir : Number((stats as any).timeInRange ?? 0);
+        const statsSourceLabel = hasProfileA1c || hasProfileTir || hasProfileAvg
+          ? "latest Dexcom Clarity report"
+          : "historical glucose readings";
+
+        const coverageStart = Number((stats as any).coverageStart ?? 0);
+        const coverageEnd = Number((stats as any).coverageEnd ?? Date.now());
+        const effectiveStart = coverageStart > 0
+          ? coverageStart
+          : Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const effectiveEnd = coverageEnd > 0 ? coverageEnd : Date.now();
+        const coverageWindowDays = Math.max(
+          1,
+          Math.ceil((effectiveEnd - effectiveStart) / (24 * 60 * 60 * 1000))
+        );
+
+        const [dailyAvgs, foodLogs, goalProgress, workouts] = await Promise.all([
+          getCGMDailyAverages(ctx.user.id, 7),
+          getFoodLogsForDay(ctx.user.id, effectiveStart, effectiveEnd),
+          getGoalProgress(ctx.user.id),
+          getWorkoutEntries(ctx.user.id, Math.min(3650, coverageWindowDays)),
+        ]);
 
         const { invokeLLM } = await import("./_core/llm");
 
@@ -2748,25 +3595,43 @@ Return ONLY valid JSON with no markdown:
           `${f.foodName}: ${f.calories}cal, ${f.proteinGrams}g protein, ${f.carbsGrams}g carbs, ${f.fatGrams}g fat`
         ).join("\n");
 
+        const workoutsInRange = workouts.filter(w => {
+          const recordedAt = Number((w as any).recordedAt ?? 0);
+          return recordedAt >= effectiveStart && recordedAt <= effectiveEnd;
+        });
+
+        const workoutSummary = workoutsInRange.slice(0, 20).map((w) => {
+          const at = Number((w as any).recordedAt ?? 0);
+          const atText = at > 0
+            ? new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+            : "Unknown date";
+          return `${atText}: ${w.exerciseName} (${w.durationMinutes}m, ${w.intensity}${w.caloriesBurned ? `, ${w.caloriesBurned} cal` : ""})`;
+        }).join("\n");
+
         const goalSummary = goalProgress
           ? `Goal: ${goalProgress.goalWeight} lbs by ${new Date(goalProgress.daysRemaining * 86400000 + Date.now()).toLocaleDateString()}. Currently ${goalProgress.progressPercentage}% complete.`
           : "No weight goal set.";
 
         const prompt = `You are a health coach analyzing a user's metabolic data. Provide 3-4 concise, actionable insights.
 
-Glucose Data (last 30 days):
-- Average: ${stats.average} mg/dL
-- A1C Estimate: ${stats.a1cEstimate}%
-- Time in Range (70-180): ${stats.timeInRange}%
+Glucose Data (full imported/report range):
+- Average: ${Math.round(effectiveAvg * 10) / 10} mg/dL
+- A1C Estimate: ${Math.round(effectiveA1c * 100) / 100}%
+- Time in Range (70-180): ${Math.round(effectiveTir * 10) / 10}%
 - Time Above Range: ${stats.timeAboveRange}%
 - Time Below Range: ${stats.timeBelowRange}%
+- Data coverage: ${coverageWindowDays} day(s)
+- Primary metric source: ${statsSourceLabel}
 
-Recent Food Log (last 7 days, up to 20 items):
+Food Logs in coverage range (up to 20 items):
 ${foodSummary || "No food logs available."}
+
+Workouts in coverage range (up to 20 items):
+${workoutSummary || "No workouts available."}
 
 ${goalSummary}
 
-Return a JSON object with an "insights" array of exactly 3 items. Each item has:
+Return a JSON object with an "insights" array of exactly 3 items. Each item must include:
 - "title": short title (5 words max)
 - "message": actionable advice (1-2 sentences)
 - "type": one of "success", "warning", "info"`;
@@ -2814,6 +3679,82 @@ Return a JSON object with an "insights" array of exactly 3 items. Each item has:
           return null;
         }
       }),
+    getDexcomCurrent: protectedProcedure
+      .query(async ({ ctx }) => {
+        const dexcom = await getDexcomSourceAndCredentials(ctx.user.id);
+        if (!dexcom) return null;
+
+        const records = await fetchDexcomRecords(dexcom);
+        if (records.length === 0) return null;
+
+        return records[0];
+      }),
+    getDexcomHistory: protectedProcedure
+      .input(z.object({ hours: z.number().int().min(1).max(24).default(6) }))
+      .query(async ({ ctx, input }) => {
+        const dexcom = await getDexcomSourceAndCredentials(ctx.user.id);
+        if (!dexcom) return [];
+
+        const records = await fetchDexcomRecords(dexcom);
+        const cutoff = Date.now() - input.hours * 60 * 60 * 1000;
+
+        return records
+          .filter((r) => new Date(r.readingAt).getTime() >= cutoff)
+          .sort((a, b) => new Date(b.readingAt).getTime() - new Date(a.readingAt).getTime());
+      }),
+    importDexcomHistory: protectedProcedure
+      .input(z.object({ hours: z.number().int().min(1).max(24).default(12) }))
+      .mutation(async ({ ctx, input }) => {
+        const dexcom = await getDexcomSourceAndCredentials(ctx.user.id);
+        if (!dexcom) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Dexcom is not connected. Connect Dexcom (Nightscout or OAuth) in Sources first.",
+          });
+        }
+
+        if (dexcom.mode !== "oauth") {
+          const records = await fetchDexcomRecords(dexcom);
+          const cutoff = Date.now() - input.hours * 60 * 60 * 1000;
+          const recentRecords = records.filter((r) => new Date(r.readingAt).getTime() >= cutoff);
+
+          if (recentRecords.length === 0) return { imported: 0 };
+
+          const existing = await getGlucoseReadingsForDateRange(ctx.user.id, cutoff, Date.now());
+          const existingKeys = new Set(existing.map((e) => `${e.readingAt}-${e.mgdl}`));
+
+          const insertRows = recentRecords
+            .map((r) => ({
+              readingAt: new Date(r.readingAt).getTime(),
+              mgdl: r.mgdl,
+              trend: r.trend,
+            }))
+            .filter((r) => !existingKeys.has(`${r.readingAt}-${r.mgdl}`));
+
+          if (insertRows.length > 0) {
+            await addGlucoseReadings(ctx.user.id, dexcom.sourceId, insertRows);
+          }
+
+          return { imported: insertRows.length };
+        }
+
+        const daysBack = Math.max(1, Math.ceil(input.hours / 24));
+        const result = await importDexcomGlucose(
+          ctx.user.id,
+          dexcom.sourceId,
+          { accessToken: dexcom.accessToken },
+          daysBack
+        );
+
+        if (!result.success) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: result.error || "Failed to import Dexcom history",
+          });
+        }
+
+        return { imported: result.recordsImported };
+      }),
   }),
   manualGlucose: router({
     addEntry: protectedProcedure
@@ -2822,10 +3763,11 @@ Return a JSON object with an "insights" array of exactly 3 items. Each item has:
           mgdl: z.number().positive().max(1000),
           readingAt: z.number().int().positive(),
           notes: z.string().max(500).optional(),
+          mealContext: z.enum(["breakfast", "lunch", "dinner", "snack"]).optional(),
         })
       )
       .mutation(({ ctx, input }) =>
-        addManualGlucoseEntry(ctx.user.id, input.mgdl, input.readingAt, input.notes)
+        addManualGlucoseEntry(ctx.user.id, input.mgdl, input.readingAt, input.notes, input.mealContext)
       ),
     getTodayEntries: protectedProcedure
       .input(z.object({ dayStart: z.number().int() }))
@@ -2860,6 +3802,83 @@ Provide one short, practical, encouraging insight (2-3 sentences) about their gl
           const response = await invokeLLM({
             messages: [
               { role: "system", content: "You are a supportive diabetes health coach. Be brief and practical." },
+              { role: "user", content: prompt },
+            ],
+          });
+          const content = response.choices[0].message.content;
+          return typeof content === "string" ? content.trim() : null;
+        } catch {
+          return null;
+        }
+      }),
+    analyzeMealPatterns: protectedProcedure
+      .input(z.object({ dayStart: z.number().int(), dayEnd: z.number().int() }))
+      .query(async ({ ctx, input }) => {
+        const [glucoseEntries, foodLogs, workouts] = await Promise.all([
+          getGlucoseReadingsForDateRange(ctx.user.id, input.dayStart, input.dayEnd),
+          getFoodLogsForDay(ctx.user.id, input.dayStart, input.dayEnd),
+          getWorkoutEntries(
+            ctx.user.id,
+            Math.max(1, Math.ceil((input.dayEnd - input.dayStart) / (24 * 60 * 60 * 1000)))
+          ),
+        ]);
+
+        if (!glucoseEntries || glucoseEntries.length === 0) return null;
+
+        const { invokeLLM } = await import("./_core/llm");
+
+        const glucoseSummary = glucoseEntries
+          .map((e: any) => {
+            const time = new Date(e.readingAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+            return `${time}: ${e.mgdl} mg/dL${e.mealContext ? ` (before ${e.mealContext})` : ""}`;
+          })
+          .join("\n");
+
+        const mealsByType: Record<string, string[]> = {};
+        for (const log of foodLogs) {
+          const meal = log.mealType || "other";
+          if (!mealsByType[meal]) mealsByType[meal] = [];
+          mealsByType[meal].push(`${log.foodName} (${log.calories} cal, ${log.carbsGrams}g carbs)`);
+        }
+        const foodSummary = Object.entries(mealsByType)
+          .map(([meal, foods]) => `${meal}: ${foods.join(", ")}`)
+          .join("\n");
+
+        const workoutsInWindow = workouts.filter((w) => {
+          const recordedAt = Number((w as any).recordedAt ?? 0);
+          return recordedAt >= input.dayStart && recordedAt <= input.dayEnd;
+        });
+
+        const workoutSummary = workoutsInWindow
+          .slice(0, 20)
+          .map((w) => `${w.exerciseName} (${w.durationMinutes} mins, ${w.intensity})`)
+          .join("\n");
+
+        const avgGlucose = Math.round(glucoseEntries.reduce((s: number, e: any) => s + e.mgdl, 0) / glucoseEntries.length);
+
+        const prompt = `You are a diabetes health coach analyzing a user's food and glucose data for today.
+
+Glucose readings:
+${glucoseSummary}
+Average: ${avgGlucose} mg/dL
+
+Food logged in selected range:
+${foodSummary || "No food logged yet"}
+
+Workouts in selected range:
+${workoutSummary || "No workouts logged yet"}
+
+Based on this data, provide a concise analysis (3-5 sentences) that:
+1. Identifies which meals or foods may be contributing to higher glucose readings
+2. Highlights any positive patterns including exercise effects where relevant
+3. Gives 1-2 specific, actionable recommendations to improve glucose control using both nutrition and workout timing
+
+Be supportive and practical. Focus on the correlation between the specific foods eaten and glucose levels.`;
+
+        try {
+          const response = await invokeLLM({
+            messages: [
+              { role: "system", content: "You are a supportive diabetes health coach specializing in food-glucose correlations. Be specific and actionable." },
               { role: "user", content: prompt },
             ],
           });

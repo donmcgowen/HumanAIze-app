@@ -30,6 +30,8 @@ import {
   Settings,
   MessageSquarePlus,
   ShoppingCart,
+  Droplets,
+  Shield,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -42,19 +44,18 @@ import { toast } from "sonner";
 // Set MVP_ONLY to true to show only the 4 core MVP screens
 const MVP_ONLY = false;
 
-const allMenuItems = [
+const baseMenuItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard", mvp: true },
   { icon: Cable, label: "Monitoring", path: "/monitoring", mvp: true },
   { icon: Apple, label: "Food Logging", path: "/food-logging", mvp: true },
   { icon: Dumbbell, label: "Workouts", path: "/workouts", mvp: true },
   { icon: ShoppingCart, label: "Grocery", path: "/grocery", mvp: true },
+  { icon: Droplets, label: "Glucose Monitor", path: "/glucose-monitor", mvp: true },
   { icon: TrendingUp, label: "Progress", path: "/progress", mvp: false },
   { icon: MessageSquarePlus, label: "App Feedback", path: "/feedback", mvp: false },
   { icon: Mail, label: "Weekly Summaries", path: "/summaries", mvp: false },
   { icon: HelpCircle, label: "Help", path: "/help", mvp: true },
 ];
-
-const menuItems = MVP_ONLY ? allMenuItems.filter((item) => item.mvp) : allMenuItems;
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { loading, user } = useAuth();
@@ -107,6 +108,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
 function DashboardLayoutContent({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
+  const normalizedEmail = (user?.email ?? "").trim().toLowerCase();
+  const isAdminUser = user?.role === "admin" || normalizedEmail === "donmcgowen@outlook.com";
+  const menuItems = MVP_ONLY ? baseMenuItems.filter((item) => item.mvp) : baseMenuItems;
+  const visibleMenuItems = isAdminUser
+    ? [...menuItems, { icon: Shield, label: "Admin", path: "/admin", mvp: false }]
+    : menuItems;
   const utils = trpc.useUtils();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const profileQuery = trpc.profile.get.useQuery(undefined, { staleTime: 60_000 });
@@ -186,7 +193,7 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
     }
   };
 
-  const currentPage = menuItems.find((item) => item.path === location);
+  const currentPage = visibleMenuItems.find((item) => item.path === location);
 
   const userInitial = user?.name?.charAt(0).toUpperCase() ?? user?.email?.charAt(0).toUpperCase() ?? "U";
 
@@ -252,7 +259,7 @@ function DashboardLayoutContent({ children }: { children: ReactNode }) {
 
         {/* Nav items */}
         <nav className="flex-1 overflow-y-auto py-3">
-          {menuItems.map((item) => {
+          {visibleMenuItems.map((item) => {
             const isActive = location === item.path;
             return (
               <button
