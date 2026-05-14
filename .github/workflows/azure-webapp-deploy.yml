@@ -19,6 +19,8 @@ jobs:
       # ── 1. Checkout code ──────────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       # ── 2. Set up Node + pnpm ─────────────────────────────────────────────
       - name: Enable Corepack (pnpm)
@@ -36,6 +38,21 @@ jobs:
 
       - name: Build app (client + server)
         run: pnpm run build
+
+      - name: Verify APK artifact is real binary
+        run: |
+          APK_PATH="client/public/downloads/humanaize-android-latest.apk"
+          if [ -f "$APK_PATH" ]; then
+            APK_SIZE=$(stat -c%s "$APK_PATH")
+            echo "APK size: ${APK_SIZE} bytes"
+            # Guardrail: fail fast if this is likely a Git LFS pointer file.
+            if [ "$APK_SIZE" -lt 1048576 ]; then
+              echo "❌ APK is unexpectedly small. Git LFS object was likely not downloaded."
+              exit 1
+            fi
+          else
+            echo "⚠️ APK file not found at $APK_PATH (skipping size check)."
+          fi
 
       # ── 4. Prepare deployment package ─────────────────────────────────────
       - name: Copy package files into dist
