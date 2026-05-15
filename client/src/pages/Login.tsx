@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { getLoginUrl } from "@/const";
-import { AlertCircle, TrendingUp } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -36,9 +36,7 @@ export default function Login() {
       <div className="w-full max-w-md space-y-6">
         {/* Logo */}
         <div className="flex flex-col items-center gap-2 mb-2">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center">
-            <TrendingUp className="w-6 h-6 text-white" />
-          </div>
+          <img src="/humanaize-logo.jpg" alt="HumanAIze" className="w-16 h-16 rounded-xl object-cover" />
           <h1 className="text-2xl font-bold text-white">HumanAIze</h1>
           <p className="text-slate-400 text-sm">Your personal health intelligence platform</p>
         </div>
